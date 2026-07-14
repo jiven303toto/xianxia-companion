@@ -7,6 +7,7 @@ SMALL_WORLD_AUTO_FEATURE_KEY = "small_world_auto"
 SMALL_WORLD_PREACH_AUTO_FEATURE_KEY = "small_world_preach_auto"
 SMALL_WORLD_PANEL_COMMAND = ".小世界"
 SMALL_WORLD_COLLECT_COMMAND = ".收割香火"
+SMALL_WORLD_QUENCH_COMMAND = ".神识淬炼"
 SMALL_WORLD_MANIFEST_COMMAND = ".显灵"
 SMALL_WORLD_PREACH_COMMAND = ".神迹 布道"
 SMALL_WORLD_DEFAULT_REFRESH_INTERVAL_SECONDS = 30 * 60
@@ -157,10 +158,17 @@ def parse_miracle_preach_cooldown_seconds(text: str) -> int:
     return parse_chinese_duration_seconds(match.group(1))
 
 
+def parse_incense_stock_after_collect(text: str) -> Optional[int]:
+    normalized = str(text or "").replace(",", "").strip()
+    match = re.search(r"当前香火库存\s*[:：]\s*(\d+)", normalized)
+    return int(match.group(1)) if match else None
+
+
 def pack_auto_strategy(
     *,
     collect_enabled: bool = False,
     collect_threshold: float = SMALL_WORLD_DEFAULT_COLLECT_THRESHOLD,
+    quench_after_collect_enabled: bool = True,
     manifest_enabled: bool = False,
     preach_enabled: bool = False,
     refresh_interval_seconds: int = SMALL_WORLD_DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -169,6 +177,7 @@ def pack_auto_strategy(
         {
             "c": 1 if collect_enabled else 0,
             "t": max(float(collect_threshold or 0), 0.0),
+            "q": 1 if quench_after_collect_enabled else 0,
             "m": 1 if manifest_enabled else 0,
             "p": 1 if preach_enabled else 0,
             "i": max(
@@ -210,6 +219,9 @@ def unpack_auto_strategy(value: object) -> dict:
     return {
         "collect_enabled": bool(raw.get("c", raw.get("collect_enabled"))),
         "collect_threshold": max(threshold, 0.0),
+        "quench_after_collect_enabled": bool(
+            raw.get("q", raw.get("quench_after_collect_enabled", True))
+        ),
         "manifest_enabled": bool(raw.get("m", raw.get("manifest_enabled"))),
         "preach_enabled": bool(raw.get("p", raw.get("preach_enabled"))),
         "refresh_interval_seconds": max(

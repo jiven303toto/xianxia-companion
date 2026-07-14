@@ -66,6 +66,12 @@ from tg_game.features.tianji_trial import biz_tianji_trial_remnant_state
 from tg_game.features.tianji_trial.biz_tianji_trial_remnant_view import (
     parse_tianji_remnant_panel_text,
 )
+from tg_game.features.luoyun_spirit_tree import (
+    biz_luoyun_spirit_tree_daily_auto,
+)
+from tg_game.features.luoyun_spirit_tree import (
+    biz_luoyun_spirit_tree_miniapp as luoyun_spirit_tree_miniapp,
+)
 from tg_game.features.fishing.biz_fishing_replies import build_session_updates_from_reply
 from tg_game.features.fishing import biz_fishing_miniapp as fishing_miniapp
 from tg_game.features.fishing.biz_fishing_miniapp import (
@@ -76,9 +82,11 @@ from tg_game.features import biz_mulan_feature as mulan_feature
 from tg_game.features.tianxing import build_exploration_route_gate, tick_craft_loop, tick_tianxing_timeline
 from tg_game.features.small_world.biz_small_world_auto import (
     SMALL_WORLD_ACTION_COMMANDS,
-    SMALL_WORLD_ACTION_REPLY_STATES,
     SMALL_WORLD_ACTION_STATES_BY_COMMAND,
     build_auto_action_commands,
+    build_quench_command_from_collect_reply,
+    build_quench_reply_state,
+    resolve_awaited_action_command,
     select_next_action_command,
 )
 from tg_game.features.xinggong.biz_xinggong_star_board import (
@@ -198,6 +206,7 @@ COMPANION_AUTO_RESUME_HIGH_RISK_FEATURES = {
     ARTIFACT_TRIAL_FEATURE_KEY,
     WANLING_ROAM_FEATURE_KEY,
     XINGGONG_STARBOARD_FEATURE_KEY,
+    biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
     COMPANION_VOYAGE_FEATURE_KEY,
     biz_small_world_game.SMALL_WORLD_AUTO_FEATURE_KEY,
     biz_small_world_game.SMALL_WORLD_PREACH_AUTO_FEATURE_KEY,
@@ -237,6 +246,9 @@ COMPANION_AUTO_FEATURES = {
     },
     biz_estate_hunt_daily_auto.FEATURE_KEY: {
         "command": biz_estate_hunt_daily_auto.COMMAND_LABEL,
+    },
+    biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY: {
+        "command": "",
     },
     **SIMPLE_COOLDOWN_AUTO_FEATURES,
     ARTIFACT_TOUCH_FEATURE_KEY: {
@@ -538,6 +550,20 @@ async def _run_pending_estate_public_hunt(
     )
     if not hunt_request:
         return False
+    current_payload = estate_miniapp.mark_estate_miniapp_hunt_request_status(
+        current_payload,
+        "resolving",
+    )
+    _save_estate_daily_payload(storage, int(profile_id), current_payload)
+
+    def mark_running() -> None:
+        nonlocal current_payload
+        current_payload = estate_miniapp.mark_estate_miniapp_hunt_request_status(
+            current_payload,
+            "running",
+        )
+        _save_estate_daily_payload(storage, int(profile_id), current_payload)
+
     result = await estate_miniapp.run_estate_public_miniapp_production_hunt_flow(
         client,
         discovery_storage=storage,
@@ -547,6 +573,7 @@ async def _run_pending_estate_public_hunt(
         ),
         max_reveals=int(hunt_request.get("max_reveals") or 8),
         min_ap_to_settle=int(hunt_request.get("min_ap_to_settle") or 0),
+        progress_callback=mark_running,
     )
     if not result.get("ok"):
         logger.warning(
@@ -695,6 +722,136 @@ async def _run_pending_xinggong_public_starboard(
     return True
 
 
+def _save_luoyun_spirit_tree_profile_payload(
+    storage: Storage,
+    profile_id: int,
+    payload: dict,
+) -> None:
+    external_account = storage.get_external_account(int(profile_id), ASC_PROVIDER) or {}
+    profile = storage.get_profile(int(profile_id))
+    storage.upsert_external_account(
+        int(profile_id),
+        ASC_PROVIDER,
+        str(
+            external_account.get("telegram_user_id")
+            or (profile.telegram_user_id if profile else "")
+            or ""
+        ),
+        str(
+            external_account.get("telegram_username")
+            or (profile.telegram_username if profile else "")
+            or ""
+        ),
+        str(external_account.get("status") or "connected"),
+        str(external_account.get("cookie_text") or ""),
+        payload,
+        str(external_account.get("api_token") or ""),
+    )
+
+
+async def _run_pending_luoyun_spirit_tree(
+    client: object,
+    storage: Storage,
+    profile_id: int,
+    payload: Optional[dict] = None,
+) -> bool:
+    current_payload = (
+        payload
+        if isinstance(payload, dict)
+        else read_cached_external_payload(storage, int(profile_id))
+    )
+    request = luoyun_spirit_tree_miniapp.get_pending_luoyun_spirit_tree_request(
+        current_payload
+    )
+    if not request:
+        return False
+    profile = storage.get_profile(int(profile_id))
+    if not biz_luoyun_spirit_tree_daily_auto.is_allowed_profile(profile):
+        updated_payload = luoyun_spirit_tree_miniapp.cancel_luoyun_spirit_tree_request(
+            current_payload,
+            reason="当前角色已不是落云宗，已取消云梦山灵眼赛请求。",
+        )
+        _save_luoyun_spirit_tree_profile_payload(
+            storage,
+            int(profile_id),
+            updated_payload,
+        )
+        chat_id = int(request.get("chat_id") or 0)
+        if chat_id:
+            storage.disable_companion_auto_task(
+                int(profile_id),
+                chat_id,
+                biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
+                last_error="当前角色已不是落云宗，已关闭每日云梦山灵眼赛。",
+            )
+        return True
+
+    result = await luoyun_spirit_tree_miniapp.run_luoyun_spirit_tree_public_production_flow(
+        client,
+        discovery_storage=storage,
+        run_mode=request.get("run_mode"),
+        pending_submission=(
+            luoyun_spirit_tree_miniapp.get_pending_luoyun_spirit_tree_submission(
+                current_payload
+            )
+        ),
+    )
+    retry_request = None
+    if str(result.get("status") or "") == "retry_pending":
+        retry_request = luoyun_spirit_tree_miniapp.build_luoyun_spirit_tree_request(
+            chat_id=request.get("chat_id"),
+            thread_id=request.get("thread_id"),
+            chat_type=str(request.get("chat_type") or "group"),
+            bot_username=str(request.get("bot_username") or "fanrenxiuxian_bot"),
+            run_mode=str(request.get("run_mode") or "daily"),
+            not_before=time.time()
+            + luoyun_spirit_tree_miniapp.LUOYUN_SPIRIT_TREE_PENDING_RETRY_SECONDS,
+        )
+    updated_payload = luoyun_spirit_tree_miniapp.merge_luoyun_spirit_tree_payload(
+        current_payload,
+        result,
+        request=retry_request,
+        clear_request=retry_request is None,
+    )
+    _save_luoyun_spirit_tree_profile_payload(
+        storage,
+        int(profile_id),
+        updated_payload,
+    )
+
+    chat_id = int(request.get("chat_id") or 0)
+    task = (
+        storage.get_companion_auto_task(
+            int(profile_id),
+            chat_id,
+            biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
+        )
+        if chat_id
+        else None
+    )
+    if task and str(result.get("failure_kind") or "") == "proof_rejected":
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            enabled=0,
+            next_run_at=0,
+            last_error="服务端拒绝灵眼赛 proof，已关闭每日调度并保留最后机会。",
+        )
+    elif task and retry_request is not None:
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            next_run_at=float(retry_request.get("not_before") or 0),
+            last_error="提交回包中断，将使用同一 runToken 与 proof 重提。",
+        )
+    elif task and not result.get("ok"):
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            last_error=luoyun_spirit_tree_miniapp.sanitize_luoyun_spirit_tree_secret_text(
+                result.get("error") or "云梦山灵眼赛执行失败。"
+            ),
+        )
+    return True
+
+
 def _build_tianji_trial_batch_state(
     result: dict,
     *,
@@ -741,6 +898,20 @@ async def _run_pending_tianji_public_trial(
     request = tianji_trial_miniapp.get_pending_tianji_trial_request(current_payload)
     if not request:
         return False
+    current_payload = tianji_trial_miniapp.mark_tianji_trial_request_status(
+        current_payload,
+        "resolving",
+    )
+    _save_tianji_trial_daily_payload(storage, int(profile_id), current_payload)
+
+    def mark_running() -> None:
+        nonlocal current_payload
+        current_payload = tianji_trial_miniapp.mark_tianji_trial_request_status(
+            current_payload,
+            "running",
+        )
+        _save_tianji_trial_daily_payload(storage, int(profile_id), current_payload)
+
     captures: list[dict] = []
     target_runs = tianji_trial_miniapp._miniapp_int(
         request.get("target_runs"),
@@ -755,6 +926,7 @@ async def _run_pending_tianji_public_trial(
             f"{int(float(request.get('queued_at') or 0))}"
         ),
         target_runs=target_runs,
+        progress_callback=mark_running,
     )
     if not result.get("ok"):
         logger.warning(
@@ -4087,6 +4259,14 @@ async def _run_companion_auto_scheduler(
             ):
                 payload = read_cached_external_payload(storage, int(profile_id))
                 tasks = storage.list_active_companion_auto_tasks(int(profile_id))
+            if task_ids is None and await _run_pending_luoyun_spirit_tree(
+                client,
+                storage,
+                int(profile_id),
+                payload,
+            ):
+                payload = read_cached_external_payload(storage, int(profile_id))
+                tasks = storage.list_active_companion_auto_tasks(int(profile_id))
             if not tasks:
                 if run_once:
                     return
@@ -4343,6 +4523,101 @@ async def _run_companion_auto_scheduler(
                         next_run_at=tomorrow_run_at,
                         workflow_state="sent_today",
                         last_error=biz_estate_hunt_daily_auto.SENT_TODAY_ERROR,
+                    )
+                    continue
+
+                if feature_key == biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY:
+                    chat_id = int(task.get("chat_id") or 0)
+                    if not chat_id:
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            last_error="Chat ID missing",
+                        )
+                        continue
+                    profile = storage.get_profile(int(profile_id))
+                    if not biz_luoyun_spirit_tree_daily_auto.is_allowed_profile(profile):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            next_run_at=0,
+                            last_error="当前角色已不是落云宗，已关闭每日云梦山灵眼赛。",
+                        )
+                        continue
+                    next_run_at = float(task.get("next_run_at") or 0)
+                    if next_run_at > now:
+                        continue
+                    run_time = biz_luoyun_spirit_tree_daily_auto.normalize_run_time(
+                        task.get("strategy")
+                    )
+                    tomorrow_run_at = biz_luoyun_spirit_tree_daily_auto.resolve_next_run_at(
+                        run_time,
+                        now=now,
+                        force_tomorrow=True,
+                    )
+                    last_run_at = float(task.get("last_run_at") or 0)
+                    if biz_luoyun_spirit_tree_daily_auto.is_same_local_day(
+                        last_run_at,
+                        now,
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="sent_today",
+                            last_error=biz_luoyun_spirit_tree_daily_auto.SENT_TODAY_ERROR,
+                        )
+                        continue
+                    latest_payload = read_cached_external_payload(
+                        storage,
+                        int(profile_id),
+                    )
+                    if luoyun_spirit_tree_miniapp.is_luoyun_spirit_tree_daily_target_reached(
+                        latest_payload,
+                        now=now,
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            last_run_at=now,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="completed_today",
+                            last_error=(
+                                biz_luoyun_spirit_tree_daily_auto.COMPLETED_TODAY_ERROR
+                            ),
+                        )
+                        continue
+                    if luoyun_spirit_tree_miniapp.get_pending_luoyun_spirit_tree_request(
+                        latest_payload
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=now
+                            + luoyun_spirit_tree_miniapp.LUOYUN_SPIRIT_TREE_PENDING_RETRY_SECONDS,
+                            last_error="已有云梦山灵眼赛请求在运行，稍后复查。",
+                        )
+                        continue
+                    updated_payload = luoyun_spirit_tree_miniapp.queue_luoyun_spirit_tree_request(
+                        latest_payload,
+                        chat_id=chat_id,
+                        thread_id=(
+                            int(task.get("thread_id"))
+                            if task.get("thread_id")
+                            else None
+                        ),
+                        chat_type=str(task.get("chat_type") or "group"),
+                        bot_username=str(task.get("bot_username") or "fanrenxiuxian_bot"),
+                        run_mode="daily",
+                    )
+                    _save_luoyun_spirit_tree_profile_payload(
+                        storage,
+                        int(profile_id),
+                        updated_payload,
+                    )
+                    storage.update_companion_auto_task(
+                        task_id,
+                        last_run_at=now,
+                        next_run_at=tomorrow_run_at,
+                        workflow_state="sent_today",
+                        last_error=biz_luoyun_spirit_tree_daily_auto.SENT_TODAY_ERROR,
                     )
                     continue
 
@@ -4853,9 +5128,7 @@ async def _run_companion_auto_scheduler(
                         *SMALL_WORLD_ACTION_COMMANDS,
                     ]
                     workflow_state = str(task.get("workflow_state") or "").strip()
-                    awaited_action_command = SMALL_WORLD_ACTION_REPLY_STATES.get(
-                        workflow_state
-                    )
+                    awaited_action_command = resolve_awaited_action_command(workflow_state)
 
                     if next_run_at > now:
                         last_run_at = float(task.get("last_run_at") or 0)
@@ -4949,6 +5222,36 @@ async def _run_companion_auto_scheduler(
                             since_ts=max(last_run_at - 2, 0),
                         )
                         if action_reply:
+                            if (
+                                awaited_action_command
+                                == biz_small_world_game.SMALL_WORLD_COLLECT_COMMAND
+                                and strategy["quench_after_collect_enabled"]
+                            ):
+                                quench_command = build_quench_command_from_collect_reply(
+                                    str(action_reply.get("text") or "")
+                                )
+                                if quench_command:
+                                    storage.enqueue_outgoing_command(
+                                        profile_id=int(profile_id),
+                                        chat_id=chat_id,
+                                        text=quench_command,
+                                        thread_id=thread_id,
+                                        chat_type=str(task.get("chat_type") or "group"),
+                                        bot_username=str(task.get("bot_username") or ""),
+                                    )
+                                    storage.update_companion_auto_task(
+                                        task_id,
+                                        last_run_at=now,
+                                        next_run_at=now + SMALL_WORLD_PANEL_RETRY_SECONDS,
+                                        workflow_state=build_quench_reply_state(
+                                            quench_command
+                                        ),
+                                        last_error=(
+                                            f"已收到{awaited_action_command}回包，"
+                                            f"已发送{quench_command}，等待回包。"
+                                        ),
+                                    )
+                                    continue
                             storage.update_companion_auto_task(
                                 task_id,
                                 last_run_at=now,

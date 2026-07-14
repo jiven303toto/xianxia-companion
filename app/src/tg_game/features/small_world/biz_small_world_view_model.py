@@ -44,6 +44,7 @@ def build_small_world_auto_view(
         "settings": settings,
         "collect_enabled": settings["collect_enabled"],
         "collect_threshold": settings["collect_threshold"],
+        "quench_after_collect_enabled": settings["quench_after_collect_enabled"],
         "manifest_enabled": settings["manifest_enabled"],
         "preach_enabled": settings["preach_enabled"],
         "refresh_interval_minutes": max(

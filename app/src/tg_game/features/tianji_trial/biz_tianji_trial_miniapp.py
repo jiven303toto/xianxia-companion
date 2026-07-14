@@ -28,6 +28,7 @@ from .biz_tianji_trial_view_state import (
     default_tianji_trial_run,
     format_tianji_trial_capture_report,
     get_pending_tianji_trial_request,
+    mark_tianji_trial_request_status,
     merge_tianji_trial_payload,
     queue_tianji_trial_request,
 )
@@ -913,6 +914,7 @@ async def run_tianji_trial_public_miniapp_production_flow(
     capture_sink=None,
     capture_source: str = "",
     target_runs: int = TIANJI_TRIAL_DEFAULT_BATCH_RUNS,
+    progress_callback=None,
 ) -> dict:
     try:
         if discovery_storage is not None:
@@ -933,6 +935,8 @@ async def run_tianji_trial_public_miniapp_production_flow(
             estate_launch = await estate_miniapp.fetch_estate_public_miniapp_launch(
                 client
             )
+        if progress_callback is not None:
+            progress_callback()
         init_data = await estate_miniapp.request_estate_miniapp_init_data(
             client,
             token=estate_launch.get("token"),

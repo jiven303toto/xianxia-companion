@@ -26,6 +26,7 @@ from tg_game.features.companion.biz_companion_voyage import (
 )
 from tg_game.features.cultivation.biz_cultivation_countdown import build_cultivation_countdown_entries
 from tg_game.features.estate import biz_estate_hunt_daily_auto
+from tg_game.features.luoyun_spirit_tree import biz_luoyun_spirit_tree_daily_auto
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
 from tg_game.features.tianxing.biz_tianxing_parser import get_day_key as get_tianxing_day_key
 from tg_game.features.wanling.biz_wanling_roam import WANLING_ROAM_FEATURE_KEY
@@ -233,6 +234,12 @@ def build_auto_task_countdown_items(
             "/modules/estate",
             "estate-hunt",
         ),
+        biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY: (
+            "每日云梦山灵眼赛",
+            "宗门大殿",
+            "/modules/sect",
+            "luoyun-spirit-tree",
+        ),
         DREAM_SEEK_FEATURE_KEY: ("自动入梦寻图", "三界游历", "/modules/other", "dream"),
         DIVINATION_CHAIN_FEATURE_KEY: ("自动天机代卜", "三界游历", "/modules/other", "divination"),
         WILD_EXPERIENCE_FEATURE_KEY: ("自动野外历练", "三界游历", "/modules/other", "wild"),
@@ -286,6 +293,11 @@ def build_auto_task_countdown_items(
             and str(current_sect_name or "").strip() != "万灵宗"
         ):
             continue
+        if (
+            feature_key == biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY
+            and str(current_sect_name or "").strip() != "落云宗"
+        ):
+            continue
         title, module_name, href, tone = feature_meta[feature_key]
         strategy = str(task.get("strategy") or "").strip()
         detail = ""
@@ -295,6 +307,10 @@ def build_auto_task_countdown_items(
             detail = f"固定 {biz_tianji_trial_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_estate_hunt_daily_auto.FEATURE_KEY:
             detail = f"固定 {biz_estate_hunt_daily_auto.normalize_run_time(strategy)}"
+        elif feature_key == biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY:
+            detail = (
+                f"固定 {biz_luoyun_spirit_tree_daily_auto.normalize_run_time(strategy)}"
+            )
         elif feature_key == WILD_EXPERIENCE_FEATURE_KEY:
             detail = f"策略 {strategy or '均衡'}"
         elif feature_key == COMPANION_VOYAGE_FEATURE_KEY:

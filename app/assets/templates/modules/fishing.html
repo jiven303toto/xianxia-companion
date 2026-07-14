@@ -24,7 +24,7 @@
 }
 </style>
 
-<section class="detail-grid three-column-grid">
+<section class="detail-grid two-column-grid">
     <div class="detail-card">
         <div class="section-header compact">
             <p>钓鱼状态</p>
@@ -48,24 +48,6 @@
         {% if fishing_state.last_error %}
         <p class="muted top-gap" style="color: var(--error);">{{ fishing_state.last_error }}</p>
         {% endif %}
-    </div>
-
-    <div class="detail-card">
-        <div class="section-header compact">
-            <p>入口诊断</p>
-            <h2>MiniApp 接入诊断</h2>
-        </div>
-        <div class="stack-list compact-stack">
-            <div class="kv-row"><span>接入阶段</span><strong>入口诊断 / 自动接管</strong></div>
-            <div class="kv-row"><span>入口状态</span><strong>{{ fishing_state.miniapp_entry.status_label }}</strong></div>
-            <div class="kv-row"><span>Host</span><strong>{{ fishing_state.miniapp_entry.host }}</strong></div>
-            <div class="kv-row"><span>入口按钮</span><strong>{{ fishing_state.miniapp_entry.button_text }}</strong></div>
-            <div class="kv-row"><span>Start 类型</span><strong>{{ fishing_state.miniapp_entry.start_param_kind }}</strong></div>
-            <div class="kv-row"><span>Start 后缀</span><strong>{{ fishing_state.miniapp_entry.start_param_suffix }}</strong></div>
-            <div class="kv-row"><span>Start 摘要</span><strong>{{ fishing_state.miniapp_entry.start_param_digest }}</strong></div>
-            <div class="kv-row"><span>敏感字段</span><strong>{{ fishing_state.miniapp_entry.sensitive_keys_text }}</strong></div>
-        </div>
-        <p class="muted top-gap">安全边界：{{ fishing_state.miniapp_entry.safety_boundary }}</p>
     </div>
 
     <div class="detail-card">

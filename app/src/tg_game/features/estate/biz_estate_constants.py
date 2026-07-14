@@ -8,7 +8,7 @@ MINIAPP_HUNT_SAFETY_BOUNDARY = (
     "不保存 initData/tgWebAppData/hash/user/raw URL/sessionId。"
 )
 ESTATE_MINIAPP_DEFAULT_BOT_USERNAME = "fanrenxiuxian_bot"
-ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL = "fanrenxxz"
+ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL = "fsnrenxxz"
 ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID = 108634
 ESTATE_MINIAPP_PUBLIC_ENTRY_STATE_KEY = "estate_public_entry_discovery"
 ESTATE_MINIAPP_DEFAULT_API_BASE_URL = "https://asc.aiopenai.app"

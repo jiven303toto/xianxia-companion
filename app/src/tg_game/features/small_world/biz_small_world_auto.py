@@ -18,6 +18,8 @@ SMALL_WORLD_ACTION_STATES_BY_COMMAND = {
     for state, command_text in SMALL_WORLD_ACTION_REPLY_STATES.items()
 }
 
+SMALL_WORLD_QUENCH_REPLY_STATE_PREFIX = "await_quench_reply:"
+
 
 def build_auto_action_commands(
     panel_state: dict,
@@ -46,3 +48,30 @@ def select_next_action_command(
         if normalized:
             return normalized
     return ""
+
+
+def build_quench_command_from_collect_reply(reply_text: str) -> str:
+    amount = biz_small_world_game.parse_incense_stock_after_collect(reply_text)
+    if not amount or amount <= 0:
+        return ""
+    return f"{biz_small_world_game.SMALL_WORLD_QUENCH_COMMAND} {amount}"
+
+
+def build_quench_reply_state(command_text: str) -> str:
+    amount_text = str(command_text or "").removeprefix(
+        biz_small_world_game.SMALL_WORLD_QUENCH_COMMAND
+    ).strip()
+    return f"{SMALL_WORLD_QUENCH_REPLY_STATE_PREFIX}{amount_text}"
+
+
+def resolve_awaited_action_command(workflow_state: str) -> str:
+    normalized = str(workflow_state or "").strip()
+    command_text = SMALL_WORLD_ACTION_REPLY_STATES.get(normalized)
+    if command_text:
+        return command_text
+    if not normalized.startswith(SMALL_WORLD_QUENCH_REPLY_STATE_PREFIX):
+        return ""
+    amount_text = normalized.removeprefix(SMALL_WORLD_QUENCH_REPLY_STATE_PREFIX).strip()
+    if not amount_text.isdigit() or int(amount_text) <= 0:
+        return ""
+    return f"{biz_small_world_game.SMALL_WORLD_QUENCH_COMMAND} {amount_text}"

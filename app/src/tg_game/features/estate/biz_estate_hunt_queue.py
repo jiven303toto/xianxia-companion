@@ -278,7 +278,33 @@ def get_pending_estate_miniapp_hunt_request(payload: object) -> dict:
     root = _as_dict(payload)
     dongfu = _as_dict(root.get("dongfu"))
     request = _as_dict(dongfu.get("miniapp_hunt_request"))
-    return request if request.get("status") == "queued" else {}
+    return request if request.get("status") in {"queued", "resolving", "running"} else {}
+
+
+def mark_estate_miniapp_hunt_request_status(payload: object, status: str) -> dict:
+    if status not in {"resolving", "running"}:
+        raise ValueError("Unsupported estate MiniApp request status")
+    result = deepcopy(payload if isinstance(payload, dict) else {})
+    dongfu = dict(result.get("dongfu") or {})
+    request = dict(dongfu.get("miniapp_hunt_request") or {})
+    if not request:
+        return result
+    now = time.time()
+    request["status"] = status
+    request["started_at"] = request.get("started_at") or now
+    hunt = dict(dongfu.get("miniapp_hunt") or {})
+    hunt.update(
+        {
+            "status": status,
+            "updated_at": now,
+            "automation_status": "正在获取入口" if status == "resolving" else "正在寻宝",
+            "error": "",
+        }
+    )
+    dongfu["miniapp_hunt_request"] = request
+    dongfu["miniapp_hunt"] = hunt
+    result["dongfu"] = dongfu
+    return result
 
 
 def is_estate_miniapp_hunt_limit_reached(payload: object) -> bool:

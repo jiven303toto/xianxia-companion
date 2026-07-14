@@ -6,6 +6,10 @@ from tg_game.features.wanling.biz_wanling_roam import (
     build_wanling_roam_command_sequence,
 )
 from tg_game.features.xinggong.biz_xinggong_star_board import XINGGONG_STARBOARD_FEATURE_KEY
+from tg_game.features.luoyun_spirit_tree import biz_luoyun_spirit_tree_daily_auto
+from tg_game.features.luoyun_spirit_tree import (
+    biz_luoyun_spirit_tree_miniapp as luoyun_spirit_tree_miniapp,
+)
 import biz_fanren_game
 import biz_sect_game
 from tg_game.web.app_helpers import (
@@ -201,6 +205,22 @@ def load_profile_card_state(
             luoyun_state = biz_sect_game.build_luoyun_view(
                 payload,
                 session=sect_session,
+            )
+        if biz_luoyun_spirit_tree_daily_auto.is_allowed_profile(profile):
+            spirit_tree_task = (
+                storage.get_companion_auto_task(
+                    profile.id,
+                    sect_chat.chat_id if sect_chat else 0,
+                    biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
+                )
+                if sect_chat
+                else None
+            )
+            luoyun_state["spirit_tree"] = (
+                luoyun_spirit_tree_miniapp.build_luoyun_spirit_tree_view(
+                    payload,
+                    spirit_tree_task,
+                )
             )
     if current_sect_feature and current_sect_feature["name"] == "星宫":
         starboard_auto_task = (

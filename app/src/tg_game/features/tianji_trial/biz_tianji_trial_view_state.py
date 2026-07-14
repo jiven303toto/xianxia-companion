@@ -111,9 +111,37 @@ def get_pending_tianji_trial_request(payload: object) -> dict:
         return {}
     trial = payload.get("tianji_trial") if isinstance(payload.get("tianji_trial"), dict) else {}
     request = trial.get("miniapp_request") if isinstance(trial.get("miniapp_request"), dict) else {}
-    if str(request.get("status") or "") not in {"queued", "running"}:
+    if str(request.get("status") or "") not in {"queued", "resolving", "running"}:
         return {}
     return {} if _is_stale_tianji_trial_request(request) else request
+
+
+def mark_tianji_trial_request_status(payload: object, status: str) -> dict:
+    if status not in {"resolving", "running"}:
+        raise ValueError("Unsupported Tianji MiniApp request status")
+    updated = deepcopy(payload) if isinstance(payload, dict) else {}
+    trial = dict(updated.get("tianji_trial") or {})
+    request = dict(trial.get("miniapp_request") or {})
+    if not request:
+        return updated
+    now = time.time()
+    request["status"] = status
+    request["started_at"] = request.get("started_at") or now
+    run = dict(trial.get("miniapp_run") or {})
+    run.update(
+        {
+            "status": status,
+            "status_label": (
+                "正在获取第1关入口" if status == "resolving" else "正在执行天机试炼"
+            ),
+            "updated_at": _now_text(now),
+            "error": "",
+        }
+    )
+    trial["miniapp_request"] = request
+    trial["miniapp_run"] = run
+    updated["tianji_trial"] = trial
+    return updated
 
 
 def _normalize_tianji_trial_rounds(value: object) -> list[dict]:
@@ -390,7 +418,11 @@ def build_tianji_trial_view(payload: object) -> dict:
     data = payload if isinstance(payload, dict) else {}
     trial = data.get("tianji_trial") if isinstance(data.get("tianji_trial"), dict) else {}
     request = trial.get("miniapp_request") if isinstance(trial.get("miniapp_request"), dict) else {}
-    request_pending = str(request.get("status") or "") in {"queued", "running"}
+    request_pending = str(request.get("status") or "") in {
+        "queued",
+        "resolving",
+        "running",
+    }
     request_stale = request_pending and _is_stale_tianji_trial_request(request)
     pending = request_pending and not request_stale
     run_source = {} if request_stale else trial.get("miniapp_run")

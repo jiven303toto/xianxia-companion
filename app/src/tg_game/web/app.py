@@ -56,6 +56,9 @@ from tg_game.features.fishing.biz_fishing_view_model import build_fishing_view
 from tg_game.features.small_world.biz_small_world_view_model import (
     build_small_world_auto_view as _small_world_build_small_world_auto_view,
 )
+from tg_game.features.small_world.biz_small_world_auto import (
+    resolve_awaited_action_command as _resolve_small_world_awaited_action_command,
+)
 from tg_game.features.sect.biz_sect_metadata import SECT_METADATA as _sect_SECT_METADATA
 from tg_game.features.sect.biz_sect_view_model import (
     NO_SECT_NAMES as _sect_NO_SECT_NAMES,
@@ -140,6 +143,10 @@ from tg_game.features.estate.biz_estate_miniapp import (
 from tg_game.features.estate import biz_estate_hunt_daily_auto
 from tg_game.features.tianji_trial import queue_tianji_trial_request
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
+from tg_game.features.luoyun_spirit_tree import biz_luoyun_spirit_tree_daily_auto
+from tg_game.features.luoyun_spirit_tree import (
+    biz_luoyun_spirit_tree_miniapp as luoyun_spirit_tree_miniapp,
+)
 from tg_game.features.tianji_trial.biz_tianji_trial_encounter_state import (
     build_tianji_encounter_state as _tianji_build_tianji_encounter_state,
 )
@@ -3504,6 +3511,170 @@ def create_app() -> FastAPI:
         )
         return RedirectResponse(url=redirect_to, status_code=303)
 
+    @application.post("/runtime/sect/luoyun-spirit-tree-canary")
+    async def runtime_start_luoyun_spirit_tree_canary(
+        request: Request,
+        chat_id: str = Form(...),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/sect"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        if not biz_luoyun_spirit_tree_daily_auto.is_allowed_profile(profile):
+            raise HTTPException(
+                status_code=400,
+                detail="仅当前宗门为落云宗时可用",
+            )
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Sect chat is not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        payload = read_cached_external_payload(storage, profile.id)
+        if luoyun_spirit_tree_miniapp.get_pending_luoyun_spirit_tree_request(payload):
+            raise HTTPException(status_code=409, detail="已有云梦山灵眼赛请求在运行")
+        updated_payload = luoyun_spirit_tree_miniapp.queue_luoyun_spirit_tree_request(
+            payload,
+            chat_id=resolved_chat_id,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+            run_mode="canary",
+        )
+        external_account = storage.get_external_account(profile.id, ASC_PROVIDER) or {}
+        storage.upsert_external_account(
+            profile.id,
+            ASC_PROVIDER,
+            str(external_account.get("telegram_user_id") or profile.telegram_user_id or ""),
+            str(external_account.get("telegram_username") or profile.telegram_username or ""),
+            str(external_account.get("status") or "connected"),
+            str(external_account.get("cookie_text") or ""),
+            updated_payload,
+            str(external_account.get("api_token") or ""),
+        )
+        return RedirectResponse(url=redirect_to, status_code=303)
+
+    @application.post("/runtime/sect/luoyun-spirit-tree-daily-auto")
+    async def runtime_toggle_luoyun_spirit_tree_daily_auto(
+        request: Request,
+        chat_id: str = Form(...),
+        run_time: str = Form(
+            biz_luoyun_spirit_tree_daily_auto.DEFAULT_RUN_TIME
+        ),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/sect"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        if not biz_luoyun_spirit_tree_daily_auto.is_allowed_profile(profile):
+            raise HTTPException(
+                status_code=400,
+                detail="仅当前宗门为落云宗时可用",
+            )
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Sect chat is not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        feature_key = biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY
+        existing_task = storage.get_companion_auto_task(
+            profile.id,
+            resolved_chat_id,
+            feature_key,
+        )
+        payload = read_cached_external_payload(storage, profile.id)
+        if existing_task and bool(existing_task.get("enabled")):
+            storage.disable_companion_auto_task(
+                profile.id,
+                resolved_chat_id,
+                feature_key,
+                last_error="用户手动关闭每日云梦山灵眼赛。",
+            )
+            if not luoyun_spirit_tree_miniapp.get_pending_luoyun_spirit_tree_submission(
+                payload
+            ):
+                updated_payload = luoyun_spirit_tree_miniapp.cancel_luoyun_spirit_tree_request(
+                    payload,
+                    reason="用户手动关闭每日云梦山灵眼赛。",
+                )
+                external_account = storage.get_external_account(
+                    profile.id,
+                    ASC_PROVIDER,
+                ) or {}
+                storage.upsert_external_account(
+                    profile.id,
+                    ASC_PROVIDER,
+                    str(external_account.get("telegram_user_id") or profile.telegram_user_id or ""),
+                    str(external_account.get("telegram_username") or profile.telegram_username or ""),
+                    str(external_account.get("status") or "connected"),
+                    str(external_account.get("cookie_text") or ""),
+                    updated_payload,
+                    str(external_account.get("api_token") or ""),
+                )
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        board = (
+            payload.get("luoyun_spirit_tree")
+            if isinstance(payload.get("luoyun_spirit_tree"), dict)
+            else {}
+        )
+        canary = board.get("canary") if isinstance(board.get("canary"), dict) else {}
+        if not bool(canary.get("passed")):
+            raise HTTPException(
+                status_code=409,
+                detail="请先执行并通过跃、飞各一次真实 Canary",
+            )
+        normalized_run_time = biz_luoyun_spirit_tree_daily_auto.normalize_run_time(
+            run_time
+        )
+        now_ts = biz_fanren_game.time.time()
+        attempted_today = (
+            biz_luoyun_spirit_tree_daily_auto.is_same_local_day(
+                float((existing_task or {}).get("last_run_at") or 0),
+                now_ts,
+            )
+            or luoyun_spirit_tree_miniapp.is_luoyun_spirit_tree_daily_target_reached(
+                payload,
+                now=now_ts,
+            )
+        )
+        next_run_at = biz_luoyun_spirit_tree_daily_auto.resolve_next_run_at(
+            normalized_run_time,
+            now=now_ts,
+            attempted_today=attempted_today,
+        )
+        task = storage.upsert_companion_auto_task(
+            profile_id=profile.id,
+            chat_id=resolved_chat_id,
+            feature_key=feature_key,
+            enabled=True,
+            strategy=normalized_run_time,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+            next_run_at=next_run_at,
+            last_run_at=float((existing_task or {}).get("last_run_at") or 0),
+            last_error=(
+                biz_luoyun_spirit_tree_daily_auto.COMPLETED_TODAY_ERROR
+                if attempted_today
+                else ""
+            ),
+        )
+        storage.update_companion_auto_task(int(task["id"]), workflow_state="")
+        return RedirectResponse(url=redirect_to, status_code=303)
+
     @application.post("/runtime/mulan/auto-support-plan")
     async def runtime_save_mulan_auto_support_plan(
         request: Request,
@@ -4024,6 +4195,7 @@ def create_app() -> FastAPI:
         collect_threshold: str = Form(
             str(biz_small_world_game.SMALL_WORLD_DEFAULT_COLLECT_THRESHOLD)
         ),
+        quench_after_collect_enabled: str = Form("1"),
         manifest_enabled: str = Form("0"),
         preach_enabled: str = Form("0"),
         refresh_interval_minutes: int = Form(SMALL_WORLD_AUTO_DEFAULT_REFRESH_MINUTES),
@@ -4045,6 +4217,14 @@ def create_app() -> FastAPI:
         feature_key = biz_small_world_game.SMALL_WORLD_AUTO_FEATURE_KEY
 
         if enabled != "1":
+            existing_task = storage.get_companion_auto_task(
+                profile.id,
+                resolved_chat_id,
+                feature_key,
+            )
+            awaited_command = _resolve_small_world_awaited_action_command(
+                str((existing_task or {}).get("workflow_state") or "")
+            )
             storage.disable_companion_auto_task(
                 profile.id,
                 resolved_chat_id,
@@ -4056,7 +4236,10 @@ def create_app() -> FastAPI:
                 biz_small_world_game.SMALL_WORLD_COLLECT_COMMAND,
                 biz_small_world_game.SMALL_WORLD_MANIFEST_COMMAND,
                 biz_small_world_game.SMALL_WORLD_PREACH_COMMAND,
+                awaited_command,
             ):
+                if not command_text:
+                    continue
                 storage.cancel_pending_outgoing_commands(
                     profile.id,
                     resolved_chat_id,
@@ -4073,6 +4256,7 @@ def create_app() -> FastAPI:
         strategy = biz_small_world_game.pack_auto_strategy(
             collect_enabled=collect_enabled == "1",
             collect_threshold=threshold,
+            quench_after_collect_enabled=quench_after_collect_enabled == "1",
             manifest_enabled=manifest_enabled == "1",
             preach_enabled=preach_enabled == "1",
             refresh_interval_seconds=max(int(refresh_interval_minutes or 0), 5) * 60,

@@ -109,6 +109,13 @@
                 <input name="collect_threshold" type="number" min="0" step="0.01" value="{{ small_world_auto_state.collect_threshold }}">
             </label>
             <label>
+                收割后淬炼
+                <select name="quench_after_collect_enabled">
+                    <option value="1" {% if small_world_auto_state.quench_after_collect_enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not small_world_auto_state.quench_after_collect_enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
                 自动显灵
                 <select name="manifest_enabled">
                     <option value="1" {% if small_world_auto_state.manifest_enabled %}selected{% endif %}>开启</option>
@@ -126,7 +133,7 @@
                 检查间隔分钟
                 <input name="refresh_interval_minutes" type="number" min="5" step="1" value="{{ small_world_auto_state.refresh_interval_minutes }}">
             </label>
-            <div class="action-row" style="align-items: end;">
+            <div class="action-row small-world-auto-actions" style="align-items: end;">
                 <button type="submit" class="inline-button auto-toggle-button{% if small_world_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动小世界' if small_world_auto_state.active else '开启自动小世界' }}</button>
                 <button
                     type="submit"
@@ -140,7 +147,7 @@
         {% if small_world_auto_state.last_error %}
         <p class="muted top-gap">{{ small_world_auto_state.last_error }}</p>
         {% endif %}
-        <p class="muted top-gap">自动任务每轮先刷新 `.小世界`，最多只发送一条操作命令；收到该命令回包后才结束本轮。人口、信仰、稳定都满时才会跳过自动显灵，神迹布道倒计时只来自 `.神迹 布道` 回包。</p>
+        <p class="muted top-gap">自动任务每轮先刷新 `.小世界`，最多选择一条操作命令；开启“收割后淬炼”时，自动收割成功后会读取当前香火库存并发送 `.神识淬炼 &lt;全部库存&gt;`，在收到回包后结束本轮。人口、信仰、稳定都满时才会跳过自动显灵，神迹布道倒计时只来自 `.神迹 布道` 回包。</p>
     </div>
 </section>
 

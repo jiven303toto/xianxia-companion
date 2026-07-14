@@ -541,7 +541,14 @@ def _refresh_estate_item(storage: Storage, item: dict) -> None:
     )
     hunt = dongfu.get("miniapp_hunt") if isinstance(dongfu.get("miniapp_hunt"), dict) else {}
     status = str(hunt.get("status") or "").strip()
-    if request and str(request.get("status") or "") == "queued":
+    request_status = str(request.get("status") or "").strip()
+    if request and request_status == "queued":
+        item["status"] = "queued"
+        return
+    if request and request_status == "resolving":
+        item["status"] = "resolving"
+        return
+    if request and request_status == "running":
         item["status"] = "running"
         return
     if status == "limit_reached":
@@ -564,7 +571,14 @@ def _refresh_tianji_item(storage: Storage, item: dict) -> None:
     )
     request = trial.get("miniapp_request") if isinstance(trial.get("miniapp_request"), dict) else {}
     run = trial.get("miniapp_run") if isinstance(trial.get("miniapp_run"), dict) else {}
-    if request and str(request.get("status") or "") in {"queued", "running"}:
+    request_status = str(request.get("status") or "").strip()
+    if request and request_status == "queued":
+        item["status"] = "queued"
+        return
+    if request and request_status == "resolving":
+        item["status"] = "resolving"
+        return
+    if request and request_status == "running":
         item["status"] = "running"
         return
     status = str(run.get("status") or "").strip()
@@ -638,12 +652,32 @@ def _refresh_pagoda_item(storage: Storage, item: dict) -> None:
         item["reward"] = _pagoda_reward(reply_text)
 
 
+def _backfill_pagoda_rewards(storage: Storage, state: dict) -> bool:
+    batch = state.get("batches", {}).get("pagoda")
+    if not isinstance(batch, dict):
+        return False
+    changed = False
+    for item in batch.get("items") or []:
+        if item.get("status") != "success" or str(item.get("reward") or "—") != "—":
+            continue
+        reply = _pagoda_reply(storage, item)
+        reward = _pagoda_reward(reply.get("text") or "")
+        if reward == "—":
+            continue
+        item["reward"] = reward
+        changed = True
+    return changed
+
+
 def refresh_state(storage: Storage) -> dict:
     state = _load_state(storage)
+    pagoda_reward_updated = _backfill_pagoda_rewards(storage, state)
     active_kind = state.get("active_kind")
     batch = state["batches"].get(active_kind) if active_kind else None
     if not isinstance(batch, dict) or batch.get("status") != "running":
         state["active_kind"] = ""
+        if pagoda_reward_updated:
+            _save_state(storage, state)
         return state
 
     now = time.time()
@@ -724,8 +758,17 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
                 "profile_name": item.get("profile_name") or f"Profile {item.get('profile_id')}",
                 "status": status,
                 "status_label": {
-                    "queued": "等待执行",
-                    "running": "执行中",
+                    "queued": (
+                        "等待入口" if kind in {"estate", "tianji"} else "等待发送"
+                    ),
+                    "resolving": "获取入口",
+                    "running": (
+                        "正在寻宝"
+                        if kind == "estate"
+                        else "正在试炼"
+                        if kind == "tianji"
+                        else "执行中"
+                    ),
                     "success": "成功",
                     "failed": "失败",
                     "skipped": "无需执行",
@@ -735,7 +778,14 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
         )
     counts = {
         key: sum(item.get("status") == key for item in raw_items)
-        for key in ("queued", "running", "success", "failed", "skipped")
+        for key in (
+            "queued",
+            "resolving",
+            "running",
+            "success",
+            "failed",
+            "skipped",
+        )
     }
     done = counts["success"] + counts["failed"] + counts["skipped"]
     return {

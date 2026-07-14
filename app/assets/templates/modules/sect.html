@@ -115,10 +115,6 @@
             {% if current_sect_feature and current_sect_feature.name == '星宫' %}
             <div class="kv-row"><span>侍妾问安</span><strong>{{ '自动' if sect_session and sect_session.auto_companion_greet_enabled else '手动' }}</strong></div>
             {% endif %}
-            {% if current_sect_feature and current_sect_feature.name == '落云宗' %}
-            <div class="kv-row"><span>灵树自动</span><strong>{{ '自动' if sect_session and sect_session.auto_luoyun_enabled else '手动' }}</strong></div>
-            <div class="kv-row"><span>灵树冷却</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.frozen_irrigation_ready_time) if luoyun_state and luoyun_state.invasion_active and luoyun_state.frozen_irrigation_ready_time else format_timestamp(luoyun_state.irrigation_ready_time) if luoyun_state and luoyun_state.irrigation_ready_time else '已就绪' }}</strong></div>
-            {% endif %}
             {% if current_sect_feature and current_sect_feature.name == '元婴宗' %}
             <div class="kv-row"><span>问道</span><strong>{{ '自动' if sect_session and sect_session.auto_yuanying_wendao_enabled else '手动' }}</strong></div>
             <div class="kv-row">
@@ -163,13 +159,6 @@
                 <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
                 <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_lingxiao_enabled else '1' }}">
                 <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_lingxiao_enabled %} active{% endif %}">{{ '关闭自动登阶' if sect_session and sect_session.auto_lingxiao_enabled else '开启自动登阶' }}</button>
-            </form>
-            {% endif %}
-            {% if current_sect_feature and current_sect_feature.name == '落云宗' %}
-            <form method="post" action="/runtime/sect/luoyun-toggle">
-                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
-                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_luoyun_enabled else '1' }}">
-                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_luoyun_enabled %} active{% endif %}">{{ '关闭灵树自动' if sect_session and sect_session.auto_luoyun_enabled else '开启灵树自动' }}</button>
             </form>
             {% endif %}
             {% if current_sect_feature and current_sect_feature.name == '星宫' %}
@@ -338,44 +327,64 @@
 </section>
 {% endif %}
 
-{% if luoyun_state and current_sect_feature and current_sect_feature.name == '落云宗' %}
+{% if luoyun_state and luoyun_state.spirit_tree and current_sect_feature and current_sect_feature.name == '落云宗' %}
+{% set spirit_tree = luoyun_state.spirit_tree %}
 <section class="detail-grid two-column-grid">
     <div class="detail-card">
         <div class="section-header compact">
-            <p>落云宗</p>
-            <h2>灵树状态</h2>
+            <p>公共洞府 → 外府</p>
+            <h2>云梦山灵眼赛</h2>
         </div>
         <div class="stack-list compact-stack">
-            <div class="kv-row"><span>当前阶段</span><strong>{{ luoyun_state.stage or '未知' }}</strong></div>
-            <div class="kv-row"><span>当前模式</span><strong>{{ '守山中' if luoyun_state.invasion_active else '灵树循环' }}</strong></div>
-            <div class="kv-row"><span>最近灌溉</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.last_irrigation_time) if luoyun_state.last_irrigation_time else '-' }}</strong></div>
-            <div class="kv-row"><span>灌溉冷却至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.irrigation_ready_time) if luoyun_state.irrigation_ready_time else '已就绪' }}</strong></div>
-            {% if luoyun_state.invasion_active and luoyun_state.frozen_irrigation_ready_time %}
-            <div class="kv-row"><span>冻结灌溉至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.frozen_irrigation_ready_time) }}</strong></div>
-            {% endif %}
-            <div class="kv-row"><span>状态剩余</span><strong>{{ luoyun_state.remaining_text or '无' }}</strong></div>
-            <div class="kv-row"><span>当前状态</span><strong>{{ luoyun_state.current_status_text or '-' }}</strong></div>
-            <div class="kv-row"><span>待执行动作</span><strong>{{ luoyun_state.pending_count }}</strong></div>
+            <div class="kv-row"><span>跃 / jump</span><strong>{{ spirit_tree.daily.jump.best }} / 120（已用 {{ spirit_tree.daily.jump.used }}/{{ spirit_tree.daily.jump.limit }}）</strong></div>
+            <div class="kv-row"><span>飞 / fly</span><strong>{{ spirit_tree.daily.fly.best }} / 30（已用 {{ spirit_tree.daily.fly.used }}/{{ spirit_tree.daily.fly.limit }}）</strong></div>
+            <div class="kv-row"><span>我的榜分</span><strong>{{ spirit_tree.ranking.self.points or 0 }}</strong></div>
+            <div class="kv-row"><span>当前排名</span><strong>{{ ('#' ~ spirit_tree.ranking.self.rank) if spirit_tree.ranking.self.rank else '-' }}</strong></div>
+            <div class="kv-row"><span>Canary</span><strong style="color: {% if spirit_tree.canary.passed %}var(--accent-green){% else %}var(--text-muted){% endif %};">{{ '已通过' if spirit_tree.canary.passed else '未通过' }}</strong></div>
+            <div class="kv-row"><span>最近执行</span><strong>{{ spirit_tree.run.message or '尚未执行' }}</strong></div>
         </div>
-        {% if luoyun_state.next_check_source %}
-        <p class="muted top-gap">{{ luoyun_state.next_check_source }}</p>
+        {% if spirit_tree.run.error %}
+        <p class="muted top-gap">{{ spirit_tree.run.error }}</p>
         {% endif %}
     </div>
     <div class="detail-card">
         <div class="section-header compact">
-            <p>落云调度</p>
-            <h2>灵树自动</h2>
+            <p>落云宗专属</p>
+            <h2>双赛自动化</h2>
         </div>
-        <div class="stack-list compact-stack">
-            <div class="kv-row"><span>自动状态</span><strong>{{ '运行中' if luoyun_state.auto_enabled else '未启用' }}</strong></div>
-            <div class="kv-row"><span>下次判断</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.next_check_time) if luoyun_state.next_check_time else '立即检查' }}</strong></div>
-            <div class="kv-row"><span>可执行动作</span><strong>{% if luoyun_state.can_harvest %}可采摘{% elif luoyun_state.can_irrigate %}可灌溉{% elif luoyun_state.already_picked %}已采摘{% else %}等待中{% endif %}</strong></div>
-            {% if luoyun_state.invasion_active %}
-            <div class="kv-row"><span>守山循环</span><strong>每 5 分钟检查一次</strong></div>
-            <div class="kv-row"><span>守山冷却至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.defend_ready_time) if luoyun_state.defend_ready_time else '已就绪' }}</strong></div>
-            {% endif %}
+        <form class="form-grid" method="post" action="/runtime/sect/luoyun-spirit-tree-canary">
+            <input type="hidden" name="redirect_to" value="/modules/sect">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="fanrenxiuxian_bot">
+            <div class="full-span action-row">
+                <button type="submit" class="inline-button" {% if not sect_command_chat_ready or spirit_tree.pending %}disabled{% endif %}>执行双赛 Canary（各一次）</button>
+            </div>
+        </form>
+        <p class="muted top-gap">Canary 会让每个未满 3/3 的项目最多推进一次：首次固定保底，第二、三次随机；只有已满 3/3 的项目会跳过。</p>
+        <form class="form-grid top-gap" method="post" action="/runtime/sect/luoyun-spirit-tree-daily-auto">
+            <input type="hidden" name="redirect_to" value="/modules/sect">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="fanrenxiuxian_bot">
+            <label class="full-span">
+                每日执行时间（北京时间）
+                <input type="time" name="run_time" value="{{ spirit_tree.auto.run_time or '05:30' }}" required>
+            </label>
+            <div class="full-span action-row">
+                <button type="submit" class="inline-button auto-toggle-button{% if spirit_tree.auto.enabled %} active{% endif %}" {% if not sect_command_chat_ready or (not spirit_tree.auto.enabled and not spirit_tree.canary.passed) %}disabled{% endif %}>{{ '关闭每日灵眼赛' if spirit_tree.auto.enabled else '开启每日灵眼赛' }}</button>
+            </div>
+        </form>
+        <div class="stack-list compact-stack top-gap">
+            <div class="kv-row"><span>默认时间</span><strong>{{ spirit_tree.auto.run_time or '05:30' }}</strong></div>
+            <div class="kv-row"><span>下次执行</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(spirit_tree.auto.next_run_at) if spirit_tree.auto.next_run_at else '-' }}</strong></div>
+            <div class="kv-row"><span>次数策略</span><strong>首次固定保底；第二、三次随机；三次全部自动</strong></div>
         </div>
-        <p class="muted top-gap">开启后会先发送 <code>.灵树状态</code>，再根据最新回包顺序决定灌溉或采摘；若遇到古剑门入侵会切换为 <code>.协同守山</code> 循环。关闭后重新开启会清空旧缓存并重新判断。</p>
+        {% if spirit_tree.auto.last_error %}
+        <p class="muted top-gap">{{ spirit_tree.auto.last_error }}</p>
+        {% endif %}
     </div>
 </section>
 {% endif %}
@@ -873,7 +882,7 @@
 </section>
 {% endif %}
 
-{% if current_sect_feature and current_sect_feature.actions and current_sect_feature.name not in ['星宫', '黄枫谷'] %}
+{% if current_sect_feature and current_sect_feature.actions and current_sect_feature.name not in ['星宫', '黄枫谷', '落云宗'] %}
 <section class="detail-grid">
     {% for action in current_sect_feature.actions %}
     <div class="detail-card">

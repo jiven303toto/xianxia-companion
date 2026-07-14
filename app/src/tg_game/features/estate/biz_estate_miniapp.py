@@ -31,6 +31,7 @@ from .biz_estate_hunt_queue import (
     is_estate_miniapp_hunt_limit_reached,
     is_estate_miniapp_hunt_state_stale,
     mark_estate_miniapp_hunt_limit_reached,
+    mark_estate_miniapp_hunt_request_status,
     queue_estate_miniapp_hunt_request,
 )
 from .biz_estate_safety import URL_PATTERN as _URL_PATTERN
@@ -73,6 +74,7 @@ _SENSITIVE_KEY_LABELS = {
     "user": "user",
 }
 _ESTATE_PUBLIC_ENTRY_DISCOVERY_LOCK = asyncio.Lock()
+_ESTATE_PUBLIC_ENTRY_SCAN_LIMIT = 200
 
 
 def _flatten_buttons(value: object):
@@ -465,13 +467,13 @@ async def discover_estate_public_miniapp_launch(
         int(discovery_state["last_scanned_message_id"]),
         current_message_id,
     )
+    scan_from = int(discovery_state["last_scanned_message_id"])
     discovered_launch = {}
     discovered_message_id = 0
-    scan_from = int(discovery_state["last_scanned_message_id"])
-    if latest_message_id > scan_from:
+    if not current_launch and latest_message_id > scan_from:
         async for message in client.iter_messages(
             channel,
-            limit=None,
+            limit=_ESTATE_PUBLIC_ENTRY_SCAN_LIMIT,
             min_id=scan_from,
         ):
             message_id = _message_id(message)
@@ -481,24 +483,23 @@ async def discover_estate_public_miniapp_launch(
             if candidate and message_id > discovered_message_id:
                 discovered_launch = candidate
                 discovered_message_id = message_id
-        discovery_state["last_scanned_message_id"] = latest_message_id
-
-    if discovered_launch:
-        launch = discovered_launch
-        discovery_state = _updated_public_entry_state(
-            discovery_state,
-            message_id=discovered_message_id,
-            launch=launch,
-            source="incremental_scan",
-            now=current_time,
-        )
-    elif current_launch:
+    discovery_state["last_scanned_message_id"] = latest_message_id
+    if current_launch:
         launch = current_launch
         discovery_state = _updated_public_entry_state(
             discovery_state,
             message_id=current_message_id,
             launch=launch,
             source="cached_message",
+            now=current_time,
+        )
+    elif discovered_launch:
+        launch = discovered_launch
+        discovery_state = _updated_public_entry_state(
+            discovery_state,
+            message_id=discovered_message_id,
+            launch=launch,
+            source="incremental_scan",
             now=current_time,
         )
     else:
@@ -1226,6 +1227,7 @@ async def run_estate_public_miniapp_production_hunt_flow(
     capture_source: str = "",
     max_reveals: int = 8,
     min_ap_to_settle: int = 0,
+    progress_callback=None,
 ) -> dict:
     try:
         if discovery_storage is not None:
@@ -1244,6 +1246,8 @@ async def run_estate_public_miniapp_production_hunt_flow(
             )
         else:
             launch = await fetch_estate_public_miniapp_launch(client)
+        if progress_callback is not None:
+            progress_callback()
     except Exception as exc:
         return _hunt_flow_result(
             False,

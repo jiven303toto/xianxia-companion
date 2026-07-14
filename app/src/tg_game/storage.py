@@ -89,6 +89,8 @@ def _merge_local_external_payload_fields(existing_json: object, me_payload: dict
     payload_tianji_trial = payload.get("tianji_trial") if isinstance(payload, dict) else {}
     existing_xinggong = existing.get("xinggong_starboard") if isinstance(existing, dict) else {}
     payload_xinggong = payload.get("xinggong_starboard") if isinstance(payload, dict) else {}
+    existing_luoyun = existing.get("luoyun_spirit_tree") if isinstance(existing, dict) else None
+    payload_luoyun = payload.get("luoyun_spirit_tree") if isinstance(payload, dict) else None
     if isinstance(existing_tianji_trial, dict):
         if not isinstance(payload_tianji_trial, dict):
             payload["tianji_trial"] = existing_tianji_trial
@@ -107,6 +109,8 @@ def _merge_local_external_payload_fields(existing_json: object, me_payload: dict
                 if not merged_xinggong.get(key) and existing_xinggong.get(key):
                     merged_xinggong[key] = existing_xinggong[key]
             payload["xinggong_starboard"] = merged_xinggong
+    if isinstance(existing_luoyun, dict) and not isinstance(payload_luoyun, dict):
+        payload["luoyun_spirit_tree"] = existing_luoyun
     if not isinstance(existing_dongfu, dict):
         return payload
     if not isinstance(payload_dongfu, dict):

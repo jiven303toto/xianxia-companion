@@ -2668,6 +2668,7 @@ body.is-global-loading {
 
 .admin-execution-status.is-running,
 .admin-execution-result.is-running,
+.admin-execution-result.is-resolving,
 .admin-execution-result.is-queued {
     color: var(--warning);
 }
@@ -3253,6 +3254,15 @@ body.is-global-loading {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 16px;
+}
+
+.small-world-auto-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: end;
+}
+
+.small-world-auto-actions {
+    grid-column: 2 / -1;
 }
 
 .form-grid.top-gap {
@@ -5978,5 +5988,9 @@ p.muted {
 
     .form-grid {
         grid-template-columns: 1fr;
+    }
+
+    .small-world-auto-actions {
+        grid-column: auto;
     }
 }

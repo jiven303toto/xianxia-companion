@@ -293,8 +293,8 @@
                 <div><span>上次执行</span><strong>{{ bot_schedule_state.last_run }}</strong></div>
                 <div><span>最近结果</span><strong>{{ bot_schedule_state.latest_summary }}</strong></div>
                 <div><span>最近耗时</span><strong>{% if bot_schedule_state.last_elapsed_seconds is not none %}{{ '%.1f'|format(bot_schedule_state.last_elapsed_seconds) }} 秒{% else %}尚无{% endif %}</strong></div>
-                <div><span>群上 Bot</span><strong>{{ bot_schedule_state.last_live_bot_count if bot_schedule_state.last_live_bot_count is not none else '尚无' }}</strong></div>
-                <div><span>可信 Bot</span><strong>{{ bot_schedule_state.last_trusted_bot_count if bot_schedule_state.last_trusted_bot_count is not none else '尚无' }}</strong></div>
+                <div><span>群上 Bot（上次扫描）</span><strong>{{ bot_schedule_state.last_live_bot_count if bot_schedule_state.last_live_bot_count is not none else '尚无' }}</strong></div>
+                <div><span>可信 Bot（当前）</span><strong>{{ current_chat_binding_bot_total }}</strong></div>
                 <div><span>检查调度</span><strong>{{ bot_schedule_state.last_schedule_tasks_checked if bot_schedule_state.last_schedule_tasks_checked is not none else '尚无' }}</strong></div>
                 <div><span>过期任务</span><strong>{{ bot_schedule_state.last_schedule_overdue_count if bot_schedule_state.last_schedule_overdue_count is not none else '尚无' }}</strong></div>
                 <div><span>重新入队</span><strong>{{ bot_schedule_state.last_schedule_requeued_count if bot_schedule_state.last_schedule_requeued_count is not none else '尚无' }}</strong></div>
@@ -356,7 +356,7 @@
                     <span class="profile-bot-identity">
                         <strong style="font-family: var(--font-mono);">{{ bot.value }}</strong>
                         <span class="muted" style="margin-left: 10px;">{{ bot.username_label }}</span>
-                        <span class="profile-bot-status {% if bot.is_primary %}is-primary{% elif bot.is_live %}is-live{% elif current_chat_binding_bot_scan_available %}is-history{% else %}is-pending{% endif %}">{{ bot.status_label }}</span>
+                        <span class="profile-bot-status {% if bot.is_primary %}is-primary{% elif bot.is_live %}is-live{% elif bot.is_manual_trusted %}is-manual{% elif current_chat_binding_bot_scan_available %}is-history{% else %}is-pending{% endif %}">{{ bot.status_label }}</span>
                     </span>
                     <form method="post" action="/profiles/{{ active_profile.id }}/chat-bindings/{{ current_chat_binding.chat_id if current_chat_binding else bound_chat_id }}/bot-ids/remove" style="margin: 0;">
                         <input type="hidden" name="bot_id" value="{{ bot.value }}">
@@ -370,6 +370,43 @@
             <p class="muted profile-bot-empty" data-profile-bot-empty hidden>未找到匹配的 Bot。</p>
             {% else %}
             <p class="muted">当前绑定尚未配置 bot id，系统将尝试使用代码仓默认值。</p>
+            {% endif %}
+        </div>
+        {% set bot_candidates = current_chat_binding_bot_candidates or [] %}
+        <div class="top-gap" style="border-top: 1px dashed var(--border-color); padding-top: 18px;">
+            <div class="section-header compact">
+                <p>安全确认</p>
+                <h3>待确认 Bot（{{ bot_candidates|length }}）</h3>
+            </div>
+            {% if bot_candidates %}
+            <p class="muted">候选账号尚未获得回包权限。确认后才会加入当前群全部 profile 的可信列表。</p>
+            <div class="stack-list compact-stack">
+                {% for candidate in bot_candidates %}
+                <div class="profile-bot-candidate-row">
+                    <div>
+                        <strong style="font-family: var(--font-mono);">{{ candidate.sender_id }}</strong>
+                        <span class="muted">@{{ candidate.username }}</span>
+                        <span class="profile-bot-status is-pending">待确认</span>
+                        <p class="muted">有效回包 {{ candidate.evidence_count }} 次；命令 {{ candidate.command_families|join('、') }}；可信分 {{ candidate.confidence_score }}</p>
+                        <p class="muted">{{ candidate.sample_text[:160] }}</p>
+                    </div>
+                    <div class="action-row">
+                        <form method="post" action="/profiles/{{ active_profile.id }}/chat-bindings/{{ current_chat_binding.chat_id }}/bot-candidates/{{ candidate.sender_id }}/decision" data-confirm-message="确认将 @{{ candidate.username }} / {{ candidate.sender_id }} 加入全部 profile 的可信 Bot 列表？">
+                            <input type="hidden" name="action" value="trust">
+                            <input type="hidden" name="redirect_to" value="/profile#chats">
+                            <button type="submit" class="inline-button">加入可信</button>
+                        </form>
+                        <form method="post" action="/profiles/{{ active_profile.id }}/chat-bindings/{{ current_chat_binding.chat_id }}/bot-candidates/{{ candidate.sender_id }}/decision">
+                            <input type="hidden" name="action" value="reject">
+                            <input type="hidden" name="redirect_to" value="/profile#chats">
+                            <button type="submit" class="inline-button">忽略</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted">当前没有发现需要人工确认的非标准游戏 Bot。</p>
             {% endif %}
         </div>
         <p class="muted top-gap">此为代码中固定的神识锚点，无法在界面篡改。</p>

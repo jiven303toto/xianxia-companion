@@ -10,6 +10,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 import urllib.request
 
 from telethon import functions
+from tg_game.features.estate import biz_estate_miniapp as estate_miniapp
 from tg_game.features.fishing.biz_fishing_miniapp_entry import (
     MAX_FISHING_RESULT_TEXT_LENGTH,
     MINIAPP_ENTRY_MARKER,
@@ -34,9 +35,12 @@ from tg_game.features.fishing.biz_fishing_miniapp_entry import (
 
 FISHING_MINIAPP_DEFAULT_BOT_USERNAME = "fanrenxiuxian_bot"
 FISHING_MINIAPP_DEFAULT_API_BASE_URL = "https://asc.aiopenai.app"
+FISHING_MINIAPP_WEB_PATH = "/miniapp/xianxia-fishing"
 FISHING_MINIAPP_API_PATH_PREFIX = "/api/miniapp/xianxia-fishing/"
 FISHING_MINIAPP_ENDPOINTS = {
     "start": f"{FISHING_MINIAPP_API_PATH_PREFIX}start",
+    "shop": f"{FISHING_MINIAPP_API_PATH_PREFIX}shop",
+    "buy_bait": f"{FISHING_MINIAPP_API_PATH_PREFIX}buy-bait",
     "finish": f"{FISHING_MINIAPP_API_PATH_PREFIX}finish",
     "result": f"{FISHING_MINIAPP_API_PATH_PREFIX}result",
     "next": f"{FISHING_MINIAPP_API_PATH_PREFIX}next",
@@ -45,8 +49,11 @@ FISHING_MINIAPP_ALLOWED_WEB_HOSTS = {"t.me", "telegram.me", "asc.aiopenai.app"}
 FISHING_MINIAPP_ALLOWED_API_HOSTS = {"asc.aiopenai.app"}
 FISHING_MINIAPP_PROOF_DURATION_CAP_MS = 120_000
 FISHING_MINIAPP_BITE_WAIT_CAP_MS = 75_000
-FISHING_MINIAPP_RESULT_POLL_LIMIT = 3
+FISHING_MINIAPP_RESULT_POLL_LIMIT = 18
+FISHING_MINIAPP_RESULT_POLL_DELAY_SEC = 0.65
 FISHING_MINIAPP_CHAIN_REST_RANGE_SEC = (2.0, 4.0)
+FISHING_MINIAPP_MAX_DAILY_ROUNDS = 20
+FISHING_MINIAPP_DAILY_LIMIT_FALLBACK = 5
 
 _START_TOKEN_PATTERN = re.compile(
     r"\b(?P<kind>fish|farm|boss|rpt|stk|trial|df)_[A-Za-z0-9_-]{4,}\b",
@@ -139,7 +146,10 @@ def _proof_capture_summary(payload: object) -> dict:
     if challenge_id:
         summary["challenge_suffix"] = challenge_id[-4:]
         summary["challenge_digest"] = _safe_digest(challenge_id)
-    for key in ("durationMs", "progress", "score", "stability", "samples", "actions", "dangerMs", "slackMs"):
+    events = proof.get("events") if isinstance(proof.get("events"), list) else []
+    if events:
+        summary["events"] = len(events)
+    for key in ("durationMs",):
         if key in proof:
             value = proof.get(key)
             if isinstance(value, (int, float)):
@@ -381,6 +391,70 @@ def _extract_start_view(data: object) -> dict:
     }
 
 
+def _start_param_from_url(url: str) -> str:
+    try:
+        parsed = urlsplit(str(url or ""))
+    except ValueError:
+        return ""
+    for key, value in [*_parse_pairs(parsed.query), *_parse_pairs(parsed.fragment)]:
+        if str(key or "").strip().lower() in {
+            "startapp",
+            "start_param",
+            "tgwebappstartparam",
+        }:
+            return str(value or "").strip()
+    return ""
+
+
+def extract_public_fishing_launch(data: object) -> dict:
+    root = _unwrap_data(data)
+    account = root.get("account") if isinstance(root.get("account"), dict) else {}
+    external_apps = (
+        account.get("externalApps")
+        if isinstance(account.get("externalApps"), dict)
+        else {}
+    )
+    groups = external_apps.get("groups") if isinstance(external_apps.get("groups"), list) else []
+    for group in groups:
+        apps = (
+            group.get("apps")
+            if isinstance(group, dict) and isinstance(group.get("apps"), list)
+            else []
+        )
+        for app in apps:
+            if not isinstance(app, dict) or not bool(app.get("available", True)):
+                continue
+            url = urljoin(
+                f"{FISHING_MINIAPP_DEFAULT_API_BASE_URL}/",
+                str(app.get("url") or "").strip(),
+            )
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if parsed.path != FISHING_MINIAPP_WEB_PATH:
+                continue
+            token = _start_param_from_url(url)
+            if not _FISH_TOKEN_PATTERN.match(token):
+                continue
+            return {
+                "token": token,
+                "webview_url": url,
+                "entry": {
+                    "status": "captured",
+                    "button_text": _safe_text(
+                        app.get("buttonText") or app.get("title") or "灵溪垂钓",
+                        48,
+                    ),
+                    "host": (parsed.hostname or "").lower(),
+                    "path": parsed.path,
+                    "token_suffix": token[-4:],
+                    "token_digest": _safe_digest(token),
+                },
+            }
+    return {}
+
+
 def build_fishing_proof(challenge: object, *, rng=None) -> dict:
     challenge_data = challenge if isinstance(challenge, dict) else {}
     target_low = _number(challenge_data.get("targetLow"), 41.0)
@@ -392,29 +466,24 @@ def build_fishing_proof(challenge: object, *, rng=None) -> dict:
     seed_text = str(challenge_data.get("fishSeed") or "seed")
     seed_offset = sum(ord(ch) for ch in seed_text) / 19.0
 
-    elapsed_ms = 0.0
-    last_ms = 0.0
+    elapsed_ms = 0
     progress = 0.0
     tension = (target_low + target_high) / 2.0 - 8.0
     holding = False
-    danger_ms = 0.0
-    slack_ms = 0.0
-    samples = 0
-    stable_samples = 0
-    actions = 0
+    events = []
     hold_at = target_low
     release_at = max(target_low + 3.0, target_high - 24.0)
 
     while elapsed_ms < duration_limit:
         if not holding and tension < hold_at:
             holding = True
-            actions += 1
+            events.append({"t": elapsed_ms + 20, "holding": True})
         elif holding and tension > release_at:
             holding = False
+            events.append({"t": elapsed_ms + 20, "holding": False})
 
-        elapsed_ms += 1000.0 / 60.0
-        dt = min(0.05, max(0.001, (elapsed_ms - last_ms) / 1000.0))
-        last_ms = elapsed_ms
+        elapsed_ms += 20
+        dt = 0.02
         pulse = math.sin(elapsed_ms * 0.0027 * fish_power + seed_offset)
         surge = max(0.0, math.sin(elapsed_ms * 0.0041 + seed_offset * 1.7))
         fish_pull = fish_power * (0.72 + pulse * 0.24 + surge * 0.42)
@@ -426,35 +495,24 @@ def build_fishing_proof(challenge: object, *, rng=None) -> dict:
         tension = max(0.0, min(100.0, tension))
 
         if target_low <= tension <= target_high:
-            stable_samples += 1
             progress += (8.2 + fish_power * 0.7 + (2.2 if holding else 0.5)) * dt
         elif tension > target_high:
-            danger_ms += dt * 1000.0
             progress -= (1.5 + fish_power * 0.25) * dt
         else:
-            slack_ms += dt * 1000.0
             progress -= 0.9 * dt
         if holding and tension < target_low:
             progress += 1.1 * dt
         progress = max(0.0, min(100.0, progress))
-        samples += 1
         if progress >= 100.0 and elapsed_ms >= min_duration:
             break
 
-    stability = stable_samples / samples if samples > 0 else 0.0
-    penalty = danger_ms / 430.0 + slack_ms / 520.0 + max(0.0, 100.0 - progress) * 0.04
-    score = max(55, min(100, int(math.floor(72.0 + stability * 28.0 - penalty + 0.5))))
+    if progress < 100.0:
+        raise ValueError("fishing_not_landed")
     return {
-        "mode": str(challenge_data.get("mode") or "xianxiaFishingV1"),
+        "mode": "xianxiaFishingV2",
         "challengeId": str(challenge_data.get("challengeId") or ""),
-        "durationMs": int(math.floor(elapsed_ms + 0.5)),
-        "progress": round(progress, 6),
-        "score": score,
-        "stability": stability,
-        "samples": samples,
-        "actions": actions,
-        "dangerMs": int(math.floor(danger_ms + 0.5)),
-        "slackMs": int(math.floor(slack_ms + 0.5)),
+        "durationMs": int(elapsed_ms),
+        "events": events,
     }
 
 
@@ -468,8 +526,9 @@ def _flow_result(ok: bool, status: str, *, error: object = "", data: Optional[di
     }
     if proof:
         result["proof"] = {
-            "score": proof.get("score"),
+            "mode": proof.get("mode"),
             "durationMs": proof.get("durationMs"),
+            "events": len(proof.get("events") or []),
         }
     return result
 
@@ -500,10 +559,15 @@ def _poll_fishing_result(
     capture_sink=None,
     capture_source: str = "",
     events: Optional[list] = None,
+    sleeper=None,
 ) -> dict:
     events = events if events is not None else []
     result_data = {}
     for _attempt in range(max(1, int(result_poll_limit or 0))):
+        if sleeper is not None:
+            sleeper(
+                FISHING_MINIAPP_RESULT_POLL_DELAY_SEC if _attempt < 4 else 1.0
+            )
         request = build_fishing_miniapp_request("result", token=token, init_data=init_data)
         result = execute_fishing_miniapp_request(
             request,
@@ -518,7 +582,13 @@ def _poll_fishing_result(
         result_data = _extract_result_view(result.get("data") or {})
         if result_data.get("ready") is True:
             return _flow_result(True, "settled", data=result_data, events=events)
-    return _flow_result(True, "finish_submitted", data=result_data, events=events)
+    return _flow_result(
+        False,
+        "result_pending",
+        error="fishing_result_pending",
+        data=result_data,
+        events=events,
+    )
 
 
 def _extract_next_token(data: object) -> str:
@@ -537,6 +607,125 @@ def _extract_next_token(data: object) -> str:
             if token:
                 return token
     return ""
+
+
+def _extract_server_progress(data: object) -> tuple[int, int]:
+    view = _unwrap_data(data)
+    today = int(_number(view.get("today") or view.get("dailyUsed") or view.get("daily_count"), -1))
+    limit = int(_number(view.get("limit") or view.get("dailyLimit") or view.get("daily_limit"), 0))
+    return today, limit
+
+
+def _extract_shop(data: object) -> dict:
+    view = _unwrap_data(data)
+    return view.get("shop") if isinstance(view.get("shop"), dict) else {}
+
+
+def _find_shop_option(options: object, selected: object, *, key_fields: tuple[str, ...]) -> dict:
+    selected_text = str(selected or "").strip()
+    for option in options if isinstance(options, list) else []:
+        if not isinstance(option, dict):
+            continue
+        values = {str(option.get(key) or "").strip() for key in key_fields}
+        if selected_text in values:
+            return option
+    return {}
+
+
+def _prepare_fishing_cast(
+    *,
+    token: str,
+    init_data: str,
+    pond: str,
+    bait: str,
+    required_bait_count: int,
+    auto_buy_bait: bool,
+    transport,
+    capture_sink=None,
+    capture_source: str = "",
+    events: Optional[list] = None,
+) -> dict:
+    events = events if events is not None else []
+    shop_request = build_fishing_miniapp_request("shop", token=token, init_data=init_data)
+    shop_result = execute_fishing_miniapp_request(
+        shop_request,
+        transport,
+        capture_sink=capture_sink,
+        capture_source=capture_source,
+        step_key="shop",
+    )
+    _append_event(events, "shop", shop_result)
+    if not shop_result.get("ok"):
+        return _flow_result(False, "failed", error=shop_result.get("error"), events=events)
+
+    shop = _extract_shop(shop_result.get("data") or {})
+    pond_option = _find_shop_option(shop.get("ponds"), pond, key_fields=("key", "name"))
+    bait_option = _find_shop_option(shop.get("baits"), bait, key_fields=("key", "name", "itemId"))
+    if not pond_option or not bool(pond_option.get("unlocked", True)):
+        return _flow_result(False, "failed", error="fishing_pond_locked", events=events)
+    if not bait_option or not bool(bait_option.get("unlocked", True)):
+        return _flow_result(False, "failed", error="fishing_bait_level_low", events=events)
+
+    required_count = max(1, int(required_bait_count or 1))
+    bait_count = max(0, int(_number(bait_option.get("count"), 0)))
+    if bait_count < required_count:
+        if not auto_buy_bait:
+            return _flow_result(False, "failed", error="fishing_bait_missing", events=events)
+        quantity = required_count - bait_count
+        buy_request = build_fishing_miniapp_request(
+            "buy_bait",
+            token=token,
+            init_data=init_data,
+            payload={"baitKey": str(bait_option.get("key") or ""), "quantity": quantity},
+        )
+        buy_result = execute_fishing_miniapp_request(
+            buy_request,
+            transport,
+            capture_sink=capture_sink,
+            capture_source=capture_source,
+            step_key="buy_bait",
+        )
+        _append_event(events, "buy_bait", buy_result)
+        if not buy_result.get("ok"):
+            return _flow_result(False, "failed", error=buy_result.get("error"), events=events)
+
+    next_request = build_fishing_miniapp_request(
+        "next",
+        token=token,
+        init_data=init_data,
+        payload={
+            "pondKey": str(pond_option.get("key") or ""),
+            "baitItemId": str(bait_option.get("itemId") or ""),
+        },
+    )
+    next_result = execute_fishing_miniapp_request(
+        next_request,
+        transport,
+        capture_sink=capture_sink,
+        capture_source=capture_source,
+        step_key="next",
+    )
+    _append_event(events, "next", next_result)
+    if not next_result.get("ok"):
+        if str(next_result.get("error") or "") == "fishing_daily_limit_reached":
+            return _flow_result(True, "daily_limit", events=events)
+        return _flow_result(False, "failed", error=next_result.get("error"), events=events)
+    next_token = _extract_next_token(next_result.get("data") or {})
+    if not next_token:
+        return _flow_result(False, "failed", error="next token missing", events=events)
+    today, limit = _extract_server_progress(next_result.get("data") or {})
+    return _flow_result(
+        True,
+        "prepared",
+        data={
+            "token": next_token,
+            "dailyUsed": today,
+            "dailyLimit": limit,
+            "pond": str(pond_option.get("name") or pond),
+            "bait": str(bait_option.get("name") or bait),
+        },
+        events=events,
+    )
 
 
 def extract_fishing_miniapp_catches(data: object) -> list[dict]:
@@ -605,11 +794,25 @@ def run_fishing_miniapp_flow(
                 capture_sink=capture_sink,
                 capture_source=capture_source,
                 events=events,
+                sleeper=sleeper,
             )
         return _flow_result(False, "failed", error=start_result.get("error"), events=events)
 
     view = _extract_start_view(start_result.get("data") or {})
     if view["challenge"] is None:
+        if view["phase"] == "lobby":
+            return _flow_result(True, "lobby", data={"phase": "lobby"}, events=events)
+        if view["phase"] in {"expired", "settled", "missed"}:
+            return _poll_fishing_result(
+                token=token,
+                init_data=init_data,
+                transport=transport,
+                result_poll_limit=result_poll_limit,
+                capture_sink=capture_sink,
+                capture_source=capture_source,
+                events=events,
+                sleeper=sleeper,
+            )
         if view["phase"] != "waiting" or view["bite_in_ms"] > float(bite_wait_cap_ms or 0):
             return _flow_result(False, "not_ready", data={"phase": view["phase"], "bite_in_ms": view["bite_in_ms"]}, events=events)
         if sleeper is not None and view["bite_in_ms"] > 0:
@@ -629,8 +832,21 @@ def run_fishing_miniapp_flow(
 
     if not view["challenge"]:
         return _flow_result(False, "not_ready", data={"phase": view["phase"]}, events=events)
-    proof = build_fishing_proof(view["challenge"])
-    events.append({"step": "build_proof", "ok": True, "score": proof["score"]})
+    try:
+        proof = build_fishing_proof(view["challenge"])
+    except (TypeError, ValueError) as exc:
+        return _flow_result(False, "failed", error=exc, events=events)
+    events.append(
+        {
+            "step": "build_proof",
+            "ok": True,
+            "mode": proof["mode"],
+            "durationMs": proof["durationMs"],
+            "events": len(proof["events"]),
+        }
+    )
+    if sleeper is not None and proof["durationMs"] > 0:
+        sleeper(proof["durationMs"] / 1000.0)
 
     request = build_fishing_miniapp_request(
         "finish",
@@ -657,11 +873,13 @@ def run_fishing_miniapp_flow(
         capture_sink=capture_sink,
         capture_source=capture_source,
         events=events,
+        sleeper=sleeper,
     )
     if proof and result.get("ok"):
         result["proof"] = {
-            "score": proof.get("score"),
+            "mode": proof.get("mode"),
             "durationMs": proof.get("durationMs"),
+            "events": len(proof.get("events") or []),
         }
     return result
 
@@ -673,6 +891,9 @@ def run_fishing_miniapp_loop_flow(
     transport,
     sleeper=None,
     max_rounds: int = 1,
+    pond: str = "青溪浅滩",
+    bait: str = "凡饵",
+    auto_buy_bait: bool = True,
     capture_sink=None,
     capture_source: str = "",
 ) -> dict:
@@ -685,7 +906,12 @@ def run_fishing_miniapp_loop_flow(
     rounds = []
     events = []
     last_result = {}
-    for index in range(max_rounds):
+    catches = []
+    server_today = -1
+    server_limit = 0
+    limit_reached = False
+    index = 0
+    while settled_count < max_rounds:
         last_result = run_fishing_miniapp_flow(
             token=current_token,
             init_data=init_data,
@@ -694,35 +920,81 @@ def run_fishing_miniapp_loop_flow(
             capture_sink=capture_sink,
             capture_source=capture_source,
         )
+        if last_result.get("ok") and last_result.get("status") == "lobby":
+            prepared = _prepare_fishing_cast(
+                token=current_token,
+                init_data=init_data,
+                pond=pond,
+                bait=bait,
+                required_bait_count=1,
+                auto_buy_bait=auto_buy_bait,
+                transport=transport,
+                capture_sink=capture_sink,
+                capture_source=capture_source,
+                events=events,
+            )
+            if prepared.get("status") == "daily_limit":
+                data = {
+                    "settled_count": settled_count,
+                    "rounds": rounds,
+                    "catches": catches,
+                    "dailyUsed": max(server_today, 0),
+                    "dailyLimit": server_limit or FISHING_MINIAPP_DAILY_LIMIT_FALLBACK,
+                }
+                return _flow_result(True, "daily_limit", data=data, events=events)
+            if not prepared.get("ok"):
+                return _flow_result(False, "failed", error=prepared.get("error"), data={"settled_count": settled_count, "rounds": rounds, "catches": catches}, events=events)
+            prepared_data = prepared.get("data") if isinstance(prepared.get("data"), dict) else {}
+            current_token = str(prepared_data.get("token") or "")
+            server_today = int(_number(prepared_data.get("dailyUsed"), server_today))
+            server_limit = int(_number(prepared_data.get("dailyLimit"), server_limit))
+            continue
+
+        index += 1
+        round_catch = (extract_fishing_miniapp_catches(last_result.get("data") or {}) or [{}])[0]
         rounds.append(
             {
-                "index": index + 1,
+                "index": index,
                 "ok": bool(last_result.get("ok")),
                 "status": last_result.get("status"),
-                "catch": (extract_fishing_miniapp_catches(last_result.get("data") or {}) or [{}])[0],
+                "catch": round_catch,
             }
         )
-        events.append({"step": "round", "ok": bool(last_result.get("ok")), "index": index + 1})
+        if round_catch:
+            catches.append(round_catch)
+        events.append({"step": "round", "ok": bool(last_result.get("ok")), "index": index})
         if not last_result.get("ok"):
-            return _flow_result(settled_count > 0, last_result.get("status") or "failed", error=last_result.get("error"), data={"settled_count": settled_count, "rounds": rounds, "catches": [item["catch"] for item in rounds if item.get("catch")]}, events=events)
+            return _flow_result(settled_count > 0, last_result.get("status") or "failed", error=last_result.get("error"), data={"settled_count": settled_count, "rounds": rounds, "catches": catches, "dailyUsed": max(server_today, 0), "dailyLimit": server_limit or FISHING_MINIAPP_DAILY_LIMIT_FALLBACK}, events=events)
         settled_count += 1
-        if index >= max_rounds - 1:
+        if settled_count >= max_rounds or (server_limit > 0 and server_today >= server_limit):
             break
-        request = build_fishing_miniapp_request("next", token=current_token, init_data=init_data)
-        next_result = execute_fishing_miniapp_request(
-            request,
-            transport,
+
+        remaining_target = max_rounds - settled_count
+        if server_limit > 0 and server_today >= 0:
+            remaining_target = min(remaining_target, max(server_limit - server_today, 1))
+        prepared = _prepare_fishing_cast(
+            token=current_token,
+            init_data=init_data,
+            pond=pond,
+            bait=bait,
+            required_bait_count=remaining_target,
+            auto_buy_bait=auto_buy_bait,
+            transport=transport,
             capture_sink=capture_sink,
             capture_source=capture_source,
-            step_key="next",
+            events=events,
         )
-        events.append({"step": "next", "ok": bool(next_result.get("ok"))})
-        if not next_result.get("ok"):
-            return _flow_result(True, "next_failed", error=next_result.get("error"), data={"settled_count": settled_count, "rounds": rounds, "catches": [item["catch"] for item in rounds if item.get("catch")]}, events=events)
-        next_token = _extract_next_token(next_result.get("data") or {})
-        if not next_token:
-            return _flow_result(True, "next_unavailable", error="next token missing", data={"settled_count": settled_count, "rounds": rounds, "catches": [item["catch"] for item in rounds if item.get("catch")]}, events=events)
-        current_token = next_token
+        if prepared.get("status") == "daily_limit":
+            limit_reached = True
+            if server_limit > 0:
+                server_today = server_limit
+            break
+        if not prepared.get("ok"):
+            return _flow_result(True, "next_failed", error=prepared.get("error"), data={"settled_count": settled_count, "rounds": rounds, "catches": catches, "dailyUsed": max(server_today, 0), "dailyLimit": server_limit or FISHING_MINIAPP_DAILY_LIMIT_FALLBACK}, events=events)
+        prepared_data = prepared.get("data") if isinstance(prepared.get("data"), dict) else {}
+        current_token = str(prepared_data.get("token") or "")
+        server_today = int(_number(prepared_data.get("dailyUsed"), server_today))
+        server_limit = int(_number(prepared_data.get("dailyLimit"), server_limit))
         if sleeper is not None:
             low, high = FISHING_MINIAPP_CHAIN_REST_RANGE_SEC
             sleeper(random.uniform(low, high))
@@ -730,11 +1002,18 @@ def run_fishing_miniapp_loop_flow(
     data = {
         "settled_count": settled_count,
         "rounds": rounds,
-        "catches": [item["catch"] for item in rounds if item.get("catch")],
+        "catches": catches,
+        "dailyUsed": max(server_today, settled_count),
+        "dailyLimit": server_limit or FISHING_MINIAPP_DAILY_LIMIT_FALLBACK,
     }
     if isinstance(last_result.get("data"), dict):
         data.update(last_result["data"])
-    return _flow_result(True, "settled", data=data, events=events)
+    status = (
+        "daily_limit"
+        if limit_reached or (server_limit > 0 and server_today >= server_limit)
+        else "settled"
+    )
+    return _flow_result(True, status, data=data, events=events)
 
 
 def _extract_init_data_from_webview_url(url: str) -> str:
@@ -746,6 +1025,53 @@ def _extract_init_data_from_webview_url(url: str) -> str:
         if key == "tgWebAppData":
             return unquote(value)
     return ""
+
+
+def run_fishing_miniapp_public_flow(
+    *,
+    estate_token: str,
+    init_data: str,
+    pond: str,
+    bait: str,
+    max_rounds: int,
+    auto_buy_bait: bool,
+    transport,
+    sleeper=None,
+    capture_sink=None,
+    capture_source: str = "",
+) -> dict:
+    dwelling_request = estate_miniapp.build_estate_miniapp_request(
+        "start",
+        token=estate_token,
+        init_data=init_data,
+    )
+    dwelling_result = estate_miniapp.execute_estate_miniapp_request(
+        dwelling_request,
+        transport,
+    )
+    if not dwelling_result.get("ok"):
+        return _flow_result(
+            False,
+            "failed",
+            error=dwelling_result.get("error") or "公共洞府入口启动失败。",
+        )
+    launch = extract_public_fishing_launch(dwelling_result.get("data") or {})
+    if not launch:
+        return _flow_result(False, "failed", error="公共洞府未返回灵溪垂钓入口。")
+    result = run_fishing_miniapp_loop_flow(
+        token=launch.get("token"),
+        init_data=init_data,
+        transport=transport,
+        sleeper=sleeper,
+        max_rounds=max_rounds,
+        pond=pond,
+        bait=bait,
+        auto_buy_bait=auto_buy_bait,
+        capture_sink=capture_sink,
+        capture_source=capture_source,
+    )
+    result["entry"] = launch.get("entry") or {}
+    return result
 
 
 async def request_fishing_miniapp_init_data(client: object, *, token: str, webview_url: str = "") -> str:
@@ -795,6 +1121,49 @@ async def run_fishing_miniapp_production_flow(
             transport=transport or _urllib_transport,
             sleeper=sleeper or time.sleep,
             max_rounds=max_rounds,
+            capture_sink=capture_sink,
+            capture_source=capture_source,
+        )
+    except Exception as exc:
+        return _flow_result(False, "failed", error=exc)
+
+
+async def run_fishing_miniapp_public_production_flow(
+    client: object,
+    *,
+    discovery_storage: object,
+    pond: str,
+    bait: str,
+    max_rounds: int,
+    auto_buy_bait: bool = True,
+    transport=None,
+    sleeper=None,
+    capture_sink=None,
+    capture_source: str = "",
+) -> dict:
+    try:
+        discovery = await estate_miniapp.resolve_estate_public_miniapp_launch(
+            client,
+            discovery_storage,
+        )
+        if not discovery.get("ok"):
+            raise RuntimeError(str(discovery.get("error") or "洞府公共入口未找到"))
+        launch = discovery.get("launch") if isinstance(discovery.get("launch"), dict) else {}
+        init_data = await estate_miniapp.request_estate_miniapp_init_data(
+            client,
+            token=launch.get("token"),
+            webview_url=launch.get("webview_url"),
+        )
+        return await asyncio.to_thread(
+            run_fishing_miniapp_public_flow,
+            estate_token=launch.get("token"),
+            init_data=init_data,
+            pond=pond,
+            bait=bait,
+            max_rounds=max_rounds,
+            auto_buy_bait=auto_buy_bait,
+            transport=transport or _urllib_transport,
+            sleeper=sleeper or time.sleep,
             capture_sink=capture_sink,
             capture_source=capture_source,
         )

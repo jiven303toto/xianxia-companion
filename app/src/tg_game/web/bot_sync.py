@@ -83,6 +83,8 @@ def parse_bot_sync_output(
         "chat_id": int(group_match.group(2)) if group_match else None,
         "message_count": _parse_int(r"^近期消息扫描数: (\d+)$", output),
         "live_bot_count": _parse_int(r"^群上游戏 Bot: (\d+)$", output),
+        "manual_live_bot_count": _parse_int(r"^手工可信近期活跃 Bot: (\d+)$", output),
+        "candidate_bot_count": _parse_int(r"^待确认候选 Bot: (\d+)$", output),
         "before_count": _parse_int(r"^\.env Bot 数: (\d+)$", output),
         "after_count": _parse_int(r"^同步后目标 Bot 数: (\d+)$", output),
         "profile_count": len(
@@ -128,6 +130,39 @@ async def run_bot_sync_command(timeout_seconds: int = 180) -> dict:
         elapsed_seconds,
         timed_out=timed_out,
     )
+
+
+async def run_bot_candidate_action(
+    sender_id: int, *, trust: bool, timeout_seconds: int = 60
+) -> dict:
+    action = "--trust-candidate" if trust else "--reject-candidate"
+    started_at = time.monotonic()
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = await asyncio.create_subprocess_exec(
+        str(PYTHON_PATH),
+        str(SCRIPT_PATH),
+        action,
+        str(int(sender_id)),
+        cwd=str(PROJECT_ROOT),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            process.communicate(), timeout=max(int(timeout_seconds), 1)
+        )
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        return {"ok": False, "message": "候选 Bot 操作超时。"}
+    output = stdout_bytes.decode("utf-8", errors="replace").strip()
+    error = stderr_bytes.decode("utf-8", errors="replace").strip()
+    return {
+        "ok": process.returncode == 0,
+        "message": output if process.returncode == 0 else error or output,
+        "elapsed_seconds": round(time.monotonic() - started_at, 1),
+    }
 
 
 def build_busy_result() -> dict:
@@ -185,6 +220,10 @@ def load_bot_sync_result(path: Path, result_id: str) -> dict | None:
         details.append(("扫描消息", str(payload["message_count"])))
     if payload.get("live_bot_count"):
         details.append(("群上存活 Bot", str(payload["live_bot_count"])))
+    if payload.get("manual_live_bot_count"):
+        details.append(("手工可信活跃", str(payload["manual_live_bot_count"])))
+    if payload.get("candidate_bot_count"):
+        details.append(("待确认候选", str(payload["candidate_bot_count"])))
     if payload.get("after_count"):
         details.append(
             (

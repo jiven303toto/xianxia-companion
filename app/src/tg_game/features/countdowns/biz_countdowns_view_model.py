@@ -26,6 +26,7 @@ from tg_game.features.companion.biz_companion_voyage import (
 )
 from tg_game.features.cultivation.biz_cultivation_countdown import build_cultivation_countdown_entries
 from tg_game.features.estate import biz_estate_hunt_daily_auto
+from tg_game.features.fishing import biz_fishing_daily_auto
 from tg_game.features.luoyun_spirit_tree import biz_luoyun_spirit_tree_daily_auto
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
 from tg_game.features.tianxing.biz_tianxing_parser import get_day_key as get_tianxing_day_key
@@ -234,6 +235,12 @@ def build_auto_task_countdown_items(
             "/modules/estate",
             "estate-hunt",
         ),
+        biz_fishing_daily_auto.FEATURE_KEY: (
+            "每日自动钓鱼",
+            "灵溪垂钓",
+            "/modules/fishing",
+            "fishing-daily",
+        ),
         biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY: (
             "每日云梦山灵眼赛",
             "宗门大殿",
@@ -307,6 +314,8 @@ def build_auto_task_countdown_items(
             detail = f"固定 {biz_tianji_trial_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_estate_hunt_daily_auto.FEATURE_KEY:
             detail = f"固定 {biz_estate_hunt_daily_auto.normalize_run_time(strategy)}"
+        elif feature_key == biz_fishing_daily_auto.FEATURE_KEY:
+            detail = f"固定 {biz_fishing_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY:
             detail = (
                 f"固定 {biz_luoyun_spirit_tree_daily_auto.normalize_run_time(strategy)}"

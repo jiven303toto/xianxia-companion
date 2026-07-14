@@ -104,7 +104,7 @@ def normalize_chat_binding_bot_ids(binding) -> list[int]:
 
 
 def load_chat_binding_bot_scan(storage, binding) -> dict:
-    empty = {"available": False, "bot_ids": set(), "scanned_at": ""}
+    empty = {"available": False, "bot_ids": set(), "manual_live_bot_ids": set(), "scanned_at": ""}
     if not binding:
         return empty
     path = Path(storage.path).with_name(BOT_SCAN_SNAPSHOT_NAME)
@@ -125,7 +125,12 @@ def load_chat_binding_bot_scan(storage, binding) -> dict:
         return {
             "available": True,
             "bot_ids": {
-                int(value) for value in payload.get("bot_ids", []) if int(value) > 0
+                int(value)
+                for value in payload.get("official_live_bot_ids", payload.get("bot_ids", []))
+                if int(value) > 0
+            },
+            "manual_live_bot_ids": {
+                int(value) for value in payload.get("manual_live_bot_ids", []) if int(value) > 0
             },
             "scanned_at": str(payload.get("scanned_at") or ""),
         }
@@ -134,7 +139,11 @@ def load_chat_binding_bot_scan(storage, binding) -> dict:
 
 
 def build_chat_binding_bot_ids_view(
-    storage, binding, *, active_bot_ids: set[int] | None = None
+    storage,
+    binding,
+    *,
+    active_bot_ids: set[int] | None = None,
+    manual_live_bot_ids: set[int] | None = None,
 ) -> list[dict]:
     if not binding:
         return []
@@ -164,6 +173,16 @@ def build_chat_binding_bot_ids_view(
         is_main_bot = normalized_username == "fanrenxiuxian_bot"
         is_primary = normalized_bot_id == normalized_primary or is_main_bot
         is_live = active_bot_ids is not None and normalized_bot_id in active_bot_ids
+        is_manual_live = bool(
+            manual_live_bot_ids is not None and normalized_bot_id in manual_live_bot_ids
+        )
+        is_manual_trusted = bool(
+            active_bot_ids is not None
+            and not is_primary
+            and not is_live
+            and normalized_username
+            and not number_match
+        )
         rows.append(
             {
                 "value": normalized_bot_id,
@@ -173,11 +192,17 @@ def build_chat_binding_bot_ids_view(
                 "is_primary": is_primary,
                 "is_main_bot": is_main_bot,
                 "is_live": is_live,
+                "is_manual_trusted": is_manual_trusted,
+                "is_manual_live": is_manual_live,
                 "status_label": (
                     "主 Bot"
                     if is_primary
                     else "群上存活"
                     if is_live
+                    else "手工可信·近期活跃"
+                    if is_manual_live
+                    else "手工可信·近期未见"
+                    if is_manual_trusted
                     else "历史保留"
                     if active_bot_ids is not None
                     else "待扫描"
@@ -188,6 +213,7 @@ def build_chat_binding_bot_ids_view(
     rows.sort(
         key=lambda row: (
             0 if row["is_main_bot"] else 1 if row["is_live"] else 2,
+            0 if row["is_manual_trusted"] else 1,
             -int(row["sort_number"]),
             str(row["username"] or "").lower(),
             -int(row["value"]),
@@ -251,9 +277,20 @@ def build_shared_template_context(
         current_binding_bot_rows = build_chat_binding_bot_ids_view(
             current_binding,
             active_bot_ids=bot_scan["bot_ids"] if bot_scan["available"] else None,
+            manual_live_bot_ids=(
+                bot_scan["manual_live_bot_ids"] if bot_scan["available"] else None
+            ),
         )
     else:
-        bot_scan = {"available": False, "bot_ids": set(), "scanned_at": ""}
+        bot_scan = {"available": False, "bot_ids": set(), "manual_live_bot_ids": set(), "scanned_at": ""}
+    bot_candidates = (
+        storage.list_telegram_bot_candidates(
+            current_binding.chat_id,
+            thread_id=current_binding.thread_id,
+        )
+        if current_binding
+        else []
+    )
     bot_total = len(current_binding_bot_rows)
     return {
         **build_command_target_context(active_profile),
@@ -268,6 +305,7 @@ def build_shared_template_context(
         "current_chat_binding_bot_scan_available": bot_scan["available"],
         "current_chat_binding_bot_scanned_at": bot_scan["scanned_at"],
         "current_chat_binding": current_binding,
+        "current_chat_binding_bot_candidates": bot_candidates,
         "fishing_module_available": is_fishing_module_available(active_profile),
         "artifact_module_available": is_artifact_module_available(active_profile),
         "yuanying_stage_available": is_yuanying_stage(active_profile),

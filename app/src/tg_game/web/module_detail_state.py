@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import biz_fanren_game
 import biz_sect_game
+from tg_game.features.fishing import biz_fishing_daily_auto
 from tg_game.web.biz_other_play_view_model import build_pagoda_today_view
 
 from tg_game.web.biz_inventory_view_model import (
@@ -156,12 +157,15 @@ def build_fishing_module_state(
     if not enabled:
         return {}
 
+    chat_id = command_chat.chat_id if command_chat else 0
     return {
         "fishing_state": build_fishing_view(
-            storage.get_fishing_session(
+            storage.get_fishing_session(active_profile.id, chat_id),
+            storage.get_companion_auto_task(
                 active_profile.id,
-                command_chat.chat_id if command_chat else 0,
-            )
+                chat_id,
+                biz_fishing_daily_auto.FEATURE_KEY,
+            ),
         ),
     }
 

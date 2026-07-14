@@ -17,6 +17,9 @@
 .fishing-manual-command-card {
     grid-column: 1 / -1;
 }
+.fishing-auto-card {
+    grid-column: 1 / -1;
+}
 @media (max-width: 1280px) {
     .fishing-form-grid {
         grid-template-columns: 1fr;
@@ -31,7 +34,7 @@
             <h2>鱼篓与鱼讯</h2>
         </div>
         <div class="stack-list compact-stack">
-            <div class="kv-row"><span>自动钓鱼</span><strong style="color: {% if fishing_state.active %}var(--success){% else %}var(--text-muted){% endif %};">{{ '已开启' if fishing_state.active else '未开启' }}</strong></div>
+            <div class="kv-row"><span>当前任务</span><strong style="color: {% if fishing_state.active %}var(--success){% else %}var(--text-muted){% endif %};">{{ '执行中' if fishing_state.active else '空闲' }}</strong></div>
             <div class="kv-row"><span>当前状态</span><strong>{{ fishing_state.state_label }}</strong></div>
             <div class="kv-row"><span>今日竿数</span><strong>{{ fishing_state.daily_text }}</strong></div>
             <div class="kv-row"><span>下次动作</span><strong>{{ fishing_state.next_action_display }}</strong></div>
@@ -90,6 +93,58 @@
         </div>
         {% else %}
         <p class="muted">暂无鱼获记录，先刷新鱼篓。</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid two-column-grid">
+    <div class="detail-card fishing-auto-card">
+        <div class="section-header compact">
+            <p>公共洞府直连</p>
+            <h2>灵溪垂钓自动化</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>真实 Canary</span><strong style="color: {% if fishing_state.canary_passed %}var(--success){% else %}var(--text-muted){% endif %};">{{ '已通过' if fishing_state.canary_passed else '未通过' }}</strong></div>
+            <div class="kv-row"><span>每日自动</span><strong style="color: {% if fishing_state.daily_auto_enabled %}var(--success){% else %}var(--text-muted){% endif %};">{{ '已开启' if fishing_state.daily_auto_enabled else '未开启' }}</strong></div>
+            <div class="kv-row"><span>每日时间</span><strong>{{ fishing_state.daily_run_time }}</strong></div>
+            <div class="kv-row"><span>下次执行</span><strong style="font-family: var(--font-mono);">{{ fishing_state.daily_next_run_display }}</strong></div>
+            <div class="kv-row"><span>鱼饵策略</span><strong>不足时自动补足所选鱼饵</strong></div>
+        </div>
+        <form class="form-grid fishing-form-grid top-gap" method="post" action="/runtime/fishing/miniapp-canary">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/fishing">
+            <label>
+                钓点
+                <select name="pond">
+                    {% for option in fishing_state.pond_options %}
+                    <option value="{{ option.name }}" {% if option.name == fishing_state.pond %}selected{% endif %}>{{ option.name }} · {{ option.description }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                鱼饵
+                <select name="bait">
+                    {% for option in fishing_state.bait_options %}
+                    <option value="{{ option.name }}" {% if option.name == fishing_state.bait %}selected{% endif %}>{{ option.name }} · {{ option.description }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="full-span">
+                每日执行时间（北京时间）
+                <input type="time" name="run_time" value="{{ fishing_state.daily_run_time or '05:30' }}" required>
+            </label>
+            <div class="full-span action-row" style="flex-wrap: wrap;">
+                <button type="submit" class="inline-button" {% if not command_chat_ready or fishing_state.active %}disabled{% endif %}>MiniApp 试钓一竿</button>
+                <button type="submit" class="inline-button" formaction="/runtime/fishing/miniapp-full" {% if not command_chat_ready or fishing_state.active %}disabled{% endif %}>MiniApp 钓满今日</button>
+                <button type="submit" class="inline-button auto-toggle-button{% if fishing_state.daily_auto_enabled %} active{% endif %}" formaction="/runtime/fishing/miniapp-daily-auto" {% if not command_chat_ready or (not fishing_state.daily_auto_enabled and not fishing_state.canary_passed) %}disabled{% endif %}>{{ '关闭每日自动钓鱼' if fishing_state.daily_auto_enabled else '开启每日自动钓鱼' }}</button>
+            </div>
+        </form>
+        <p class="muted top-gap">先用一竿 Canary 验证当前服务端 proof；通过后可立即钓满今日或开启每日 05:30 自动执行。全流程复用公共洞府入口，不发送钓鱼群命令。</p>
+        {% if fishing_state.daily_last_error %}
+        <p class="muted top-gap">{{ fishing_state.daily_last_error }}</p>
         {% endif %}
     </div>
 </section>

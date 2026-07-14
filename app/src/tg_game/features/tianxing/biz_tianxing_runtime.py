@@ -25,7 +25,7 @@ from .biz_tianxing_parser import (
 FEATURE_KEY = "tianxing"
 TIANXING_SECT_NAME = "天星宗"
 TIANXING_BOT_USERNAME = "fanrenxiuxian_bot"
-DAILY_SET_STAR_PRIORITY = ("太阴", "贪狼")
+DAILY_SET_STAR_PRIORITY = ("贪狼", "太阴")
 TIMELINE_PHASES = {
     "planning",
     "waiting_send",

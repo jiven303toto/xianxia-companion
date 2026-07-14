@@ -74,6 +74,7 @@ from tg_game.features.luoyun_spirit_tree import (
 )
 from tg_game.features.fishing.biz_fishing_replies import build_session_updates_from_reply
 from tg_game.features.fishing import biz_fishing_miniapp as fishing_miniapp
+from tg_game.features.fishing import biz_fishing_daily_auto
 from tg_game.features.fishing.biz_fishing_miniapp import (
     append_miniapp_entry_block,
     extract_fishing_miniapp_entry,
@@ -207,6 +208,7 @@ COMPANION_AUTO_RESUME_HIGH_RISK_FEATURES = {
     WANLING_ROAM_FEATURE_KEY,
     XINGGONG_STARBOARD_FEATURE_KEY,
     biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
+    biz_fishing_daily_auto.FEATURE_KEY,
     COMPANION_VOYAGE_FEATURE_KEY,
     biz_small_world_game.SMALL_WORLD_AUTO_FEATURE_KEY,
     biz_small_world_game.SMALL_WORLD_PREACH_AUTO_FEATURE_KEY,
@@ -248,6 +250,9 @@ COMPANION_AUTO_FEATURES = {
         "command": biz_estate_hunt_daily_auto.COMMAND_LABEL,
     },
     biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY: {
+        "command": "",
+    },
+    biz_fishing_daily_auto.FEATURE_KEY: {
         "command": "",
     },
     **SIMPLE_COOLDOWN_AUTO_FEATURES,
@@ -4621,6 +4626,102 @@ async def _run_companion_auto_scheduler(
                     )
                     continue
 
+                if feature_key == biz_fishing_daily_auto.FEATURE_KEY:
+                    chat_id = int(task.get("chat_id") or 0)
+                    if not chat_id:
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            last_error="Chat ID missing",
+                        )
+                        continue
+                    next_run_at = float(task.get("next_run_at") or 0)
+                    if next_run_at > now:
+                        continue
+                    run_time = biz_fishing_daily_auto.normalize_run_time(
+                        task.get("strategy")
+                    )
+                    tomorrow_run_at = biz_fishing_daily_auto.resolve_next_run_at(
+                        run_time,
+                        now=now,
+                        force_tomorrow=True,
+                    )
+                    last_run_at = float(task.get("last_run_at") or 0)
+                    if biz_fishing_daily_auto.is_same_local_day(last_run_at, now):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="sent_today",
+                            last_error=biz_fishing_daily_auto.SENT_TODAY_ERROR,
+                        )
+                        continue
+                    session = storage.get_fishing_session(int(profile_id), chat_id)
+                    if (
+                        session
+                        and biz_fishing_daily_auto.is_same_local_day(
+                            float(session.get("last_action_at") or 0),
+                            now,
+                        )
+                        and _miniapp_int(session.get("daily_limit"), 0) > 0
+                        and _miniapp_int(session.get("daily_count"), 0)
+                        >= _miniapp_int(session.get("daily_limit"), 0)
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            last_run_at=now,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="completed_today",
+                            last_error=biz_fishing_daily_auto.COMPLETED_TODAY_ERROR,
+                        )
+                        continue
+                    if session and str(session.get("state") or "") in {
+                        "miniapp_canary",
+                        "miniapp_batch",
+                        "miniapp_canary_running",
+                        "miniapp_batch_running",
+                    }:
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=now + 300,
+                            last_error="已有灵溪垂钓任务在运行，稍后复查。",
+                        )
+                        continue
+                    session_fields = {
+                        "thread_id": (
+                            int(task.get("thread_id")) if task.get("thread_id") else None
+                        ),
+                        "chat_type": str(task.get("chat_type") or "group"),
+                        "bot_username": str(task.get("bot_username") or "fanrenxiuxian_bot"),
+                        "enabled": True,
+                        "state": "miniapp_batch",
+                        "next_action_at": now,
+                        "last_error": "每日灵溪垂钓已登记，等待公共洞府入口执行。",
+                    }
+                    if session and not biz_fishing_daily_auto.is_same_local_day(
+                        float(session.get("last_action_at") or 0),
+                        now,
+                    ):
+                        session_fields["daily_count"] = 0
+                    if session:
+                        storage.update_fishing_session(int(session["id"]), **session_fields)
+                    else:
+                        storage.upsert_fishing_session(
+                            profile_id=int(profile_id),
+                            chat_id=chat_id,
+                            pond=biz_fishing_game.FISHING_DEFAULT_POND,
+                            bait=biz_fishing_game.FISHING_DEFAULT_BAIT,
+                            daily_limit=fishing_miniapp.FISHING_MINIAPP_DAILY_LIMIT_FALLBACK,
+                            **session_fields,
+                        )
+                    storage.update_companion_auto_task(
+                        task_id,
+                        last_run_at=now,
+                        next_run_at=tomorrow_run_at,
+                        workflow_state="sent_today",
+                        last_error=biz_fishing_daily_auto.SENT_TODAY_ERROR,
+                    )
+                    continue
+
                 if feature_key == ARTIFACT_TOUCH_FEATURE_KEY:
                     chat_id = int(task.get("chat_id") or 0)
                     if not chat_id:
@@ -6248,6 +6349,7 @@ def _format_fishing_miniapp_capture_report(captures: list[dict], *, note: str = 
                 "mode",
                 "challenge_suffix",
                 "durationMs",
+                "events",
                 "progress",
                 "score",
                 "stability",
@@ -6356,6 +6458,13 @@ async def _maybe_handle_fishing_miniapp_entry(context: EventContext, storage: St
             chat_type=context.chat_binding.chat_type if context.chat_binding else "group",
             bot_username=context.chat_binding.bot_username if context.chat_binding else "",
         )
+        if str(session.get("state") or "") in {
+            "miniapp_canary",
+            "miniapp_batch",
+            "miniapp_canary_running",
+            "miniapp_batch_running",
+        }:
+            return False
         if not _miniapp_int(session.get("enabled")):
             return False
         now = time.time()
@@ -6391,6 +6500,13 @@ async def _maybe_handle_fishing_miniapp_entry(context: EventContext, storage: St
         chat_type=context.chat_binding.chat_type if context.chat_binding else "group",
         bot_username=context.chat_binding.bot_username if context.chat_binding else "",
     )
+    if str(session.get("state") or "") in {
+        "miniapp_canary",
+        "miniapp_batch",
+        "miniapp_canary_running",
+        "miniapp_batch_running",
+    }:
+        return False
     if not _miniapp_int(session.get("enabled")):
         return False
     now = time.time()
@@ -6459,6 +6575,74 @@ async def _run_fishing_auto_scheduler(
                     if session.get("thread_id") is not None
                     else None
                 )
+                state = str(session.get("state") or "")
+                if state in {
+                    "miniapp_canary",
+                    "miniapp_batch",
+                    "miniapp_canary_running",
+                    "miniapp_batch_running",
+                }:
+                    now = time.time()
+                    if float(session.get("next_action_at") or 0) > now:
+                        continue
+                    batch_mode = state in {"miniapp_batch", "miniapp_batch_running"}
+                    storage.update_fishing_session(
+                        int(session["id"]),
+                        state=(
+                            "miniapp_batch_running"
+                            if batch_mode
+                            else "miniapp_canary_running"
+                        ),
+                        next_action_at=now + 15 * 60,
+                        last_action_at=now,
+                        last_error="",
+                    )
+                    captures: list[dict] = []
+                    result = await fishing_miniapp.run_fishing_miniapp_public_production_flow(
+                        client,
+                        discovery_storage=storage,
+                        pond=str(session.get("pond") or biz_fishing_game.FISHING_DEFAULT_POND),
+                        bait=str(session.get("bait") or biz_fishing_game.FISHING_DEFAULT_BAIT),
+                        max_rounds=(
+                            fishing_miniapp.FISHING_MINIAPP_MAX_DAILY_ROUNDS
+                            if batch_mode
+                            else 1
+                        ),
+                        auto_buy_bait=True,
+                        capture_sink=captures,
+                        capture_source=f"fishing-public:{profile_id}:{int(session['id'])}",
+                    )
+                    fresh_session = (
+                        storage.get_fishing_session(int(profile_id), chat_id) or session
+                    )
+                    updates = _build_fishing_miniapp_result_updates(
+                        fresh_session,
+                        result,
+                        now=time.time(),
+                        bot_message_id=0,
+                    )
+                    updates["enabled"] = False
+                    updates["next_action_at"] = 0
+                    report_text = _format_fishing_miniapp_capture_report(captures)
+                    updates["last_result_text"] = (
+                        f"{updates.get('last_result_text') or ''}\n\n{report_text}"
+                    )[:4000]
+                    storage.update_fishing_session(int(fresh_session["id"]), **updates)
+                    daily_task = storage.get_companion_auto_task(
+                        int(profile_id),
+                        chat_id,
+                        biz_fishing_daily_auto.FEATURE_KEY,
+                    )
+                    if daily_task:
+                        task_error = str(updates.get("last_error") or "")
+                        if updates.get("state") == "finished":
+                            task_error = biz_fishing_daily_auto.COMPLETED_TODAY_ERROR
+                        storage.update_companion_auto_task(
+                            int(daily_task["id"]),
+                            workflow_state=str(updates.get("state") or ""),
+                            last_error=task_error,
+                        )
+                    continue
                 command_info = biz_fishing_game.build_next_auto_command(session)
                 if not command_info:
                     continue

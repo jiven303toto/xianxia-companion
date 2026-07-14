@@ -16,7 +16,6 @@ from .biz_estate_constants import (
     ESTATE_MINIAPP_DEFAULT_BOT_USERNAME,
     ESTATE_MINIAPP_ENDPOINTS,
     ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL,
-    ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
     ESTATE_MINIAPP_PUBLIC_ENTRY_STATE_KEY,
     ESTATE_MINIAPP_WEB_PATH,
     MINIAPP_SAFETY_BOUNDARY,
@@ -290,27 +289,17 @@ def extract_estate_miniapp_launch(event: object, text: str = "") -> dict:
 
 
 async def fetch_estate_public_miniapp_launch(client: object) -> dict:
-    channel = await client.get_entity(ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL)
-    message = await client.get_messages(
-        channel,
-        ids=ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
-    )
-    if not message:
-        raise RuntimeError("洞府公共入口消息不存在")
-    launch = extract_estate_miniapp_launch(
-        message,
-        str(getattr(message, "message", "") or ""),
-    )
-    if not launch:
-        raise RuntimeError("洞府公共入口按钮未捕获")
-    return launch
+    result = await discover_estate_public_miniapp_launch(client)
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("error") or "洞府公共入口未找到"))
+    return result["launch"]
 
 
 def default_estate_public_entry_discovery_state() -> dict:
     return {
-        "channel": ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL,
-        "current_message_id": ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
-        "last_scanned_message_id": ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
+        "channel": "",
+        "current_message_id": 0,
+        "last_scanned_message_id": 0,
         "current_bot_username": "",
         "current_entry_digest": "",
         "verified_at": 0.0,
@@ -329,10 +318,9 @@ def normalize_estate_public_entry_discovery_state(value: object) -> dict:
     last_scanned_message_id = _int_or_zero(value.get("last_scanned_message_id"))
     state.update(
         {
-            "current_message_id": current_message_id
-            or ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
-            "last_scanned_message_id": last_scanned_message_id
-            or ESTATE_MINIAPP_PUBLIC_ENTRY_MESSAGE_ID,
+            "channel": _safe_text(value.get("channel"), 64),
+            "current_message_id": current_message_id,
+            "last_scanned_message_id": last_scanned_message_id,
             "current_bot_username": _safe_text(
                 value.get("current_bot_username"), 64
             ),
@@ -416,6 +404,17 @@ def _extract_public_estate_launch(message: object) -> dict:
     return launch
 
 
+def _estate_public_entry_chat_id(client: object, storage: object = None) -> int:
+    profile_id = _int_or_zero(getattr(client, "_tg_game_profile_id", 0))
+    if profile_id and storage is not None and hasattr(storage, "list_chat_bindings"):
+        for binding in storage.list_chat_bindings(profile_id):
+            if bool(getattr(binding, "is_active", False)):
+                chat_id = _int_or_zero(getattr(binding, "chat_id", 0))
+                if chat_id:
+                    return chat_id
+    return int(ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL)
+
+
 def _updated_public_entry_state(
     state: dict,
     *,
@@ -455,26 +454,37 @@ async def discover_estate_public_miniapp_launch(
         else normalize_estate_public_entry_discovery_state(state)
     )
     current_time = float(time.time() if now is None else now)
-    channel = await client.get_entity(ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL)
+    source_chat_id = _estate_public_entry_chat_id(client, storage)
+    previous_channel = str(discovery_state.get("channel") or "")
+    source_channel = str(source_chat_id)
+    channel = await client.get_entity(source_chat_id)
     current_message_id = int(discovery_state["current_message_id"])
-    current_message = await client.get_messages(channel, ids=current_message_id)
+    current_message = (
+        await client.get_messages(channel, ids=current_message_id)
+        if current_message_id > 0
+        else None
+    )
     current_launch = _extract_public_estate_launch(current_message)
 
     latest_value = await client.get_messages(channel, limit=1)
     latest_message = _first_message(latest_value)
+    channel_changed = bool(previous_channel and previous_channel != source_channel)
+    cursor_floor = (
+        0
+        if channel_changed and not current_launch
+        else int(discovery_state["last_scanned_message_id"])
+    )
     latest_message_id = max(
         _message_id(latest_message),
-        int(discovery_state["last_scanned_message_id"]),
-        current_message_id,
+        cursor_floor,
+        current_message_id if current_launch or not channel_changed else 0,
     )
-    scan_from = int(discovery_state["last_scanned_message_id"])
     discovered_launch = {}
     discovered_message_id = 0
-    if not current_launch and latest_message_id > scan_from:
+    if not current_launch:
         async for message in client.iter_messages(
             channel,
             limit=_ESTATE_PUBLIC_ENTRY_SCAN_LIMIT,
-            min_id=scan_from,
         ):
             message_id = _message_id(message)
             if not message_id or message_id > latest_message_id:
@@ -483,6 +493,18 @@ async def discover_estate_public_miniapp_launch(
             if candidate and message_id > discovered_message_id:
                 discovered_launch = candidate
                 discovered_message_id = message_id
+        if not discovered_launch:
+            async for message in client.iter_messages(
+                channel,
+                limit=20,
+                search="洞府",
+            ):
+                message_id = _message_id(message)
+                candidate = _extract_public_estate_launch(message)
+                if candidate and message_id > discovered_message_id:
+                    discovered_launch = candidate
+                    discovered_message_id = message_id
+    discovery_state["channel"] = source_channel
     discovery_state["last_scanned_message_id"] = latest_message_id
     if current_launch:
         launch = current_launch

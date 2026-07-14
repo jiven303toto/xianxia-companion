@@ -320,6 +320,27 @@ class Storage:
                     FOREIGN KEY (profile_id) REFERENCES profiles(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS telegram_bot_candidates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    thread_id INTEGER,
+                    sender_id INTEGER NOT NULL,
+                    username TEXT NOT NULL DEFAULT '',
+                    telegram_bot_flag INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending_confirm',
+                    evidence_count INTEGER NOT NULL DEFAULT 0,
+                    command_families TEXT NOT NULL DEFAULT '[]',
+                    sample_message_id INTEGER NOT NULL DEFAULT 0,
+                    sample_reply_to_msg_id INTEGER NOT NULL DEFAULT 0,
+                    sample_text TEXT NOT NULL DEFAULT '',
+                    confidence_score INTEGER NOT NULL DEFAULT 0,
+                    first_seen_at REAL NOT NULL,
+                    last_seen_at REAL NOT NULL,
+                    confirmed_at REAL NOT NULL DEFAULT 0,
+                    rejected_at REAL NOT NULL DEFAULT 0,
+                    UNIQUE(chat_id, thread_id, sender_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS module_settings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     profile_id INTEGER NOT NULL,
@@ -2054,6 +2075,51 @@ class Storage:
                 (_json_dumps_compact(bot_ids), _json_dumps_bot_username_map(username_map), normalized, time.time(), int(chat_id), thread_id),
             )
         return self.get_binding_by_id(binding.id)
+
+    def list_telegram_bot_candidates(
+        self, chat_id: int, thread_id: Optional[int] = None, status: str = "pending_confirm"
+    ) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM telegram_bot_candidates
+                WHERE chat_id=? AND COALESCE(thread_id, 0)=COALESCE(?, 0) AND status=?
+                ORDER BY confidence_score DESC, evidence_count DESC, last_seen_at DESC
+                """,
+                (int(chat_id), thread_id, str(status or "pending_confirm")),
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["command_families"] = json.loads(item.get("command_families") or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["command_families"] = []
+            items.append(item)
+        return items
+
+    def set_telegram_bot_candidate_status(
+        self,
+        chat_id: int,
+        sender_id: int,
+        status: str,
+        thread_id: Optional[int] = None,
+    ) -> bool:
+        normalized_status = str(status or "").strip()
+        if normalized_status not in {"trusted", "rejected"}:
+            return False
+        now = time.time()
+        time_field = "confirmed_at" if normalized_status == "trusted" else "rejected_at"
+        with self.connect() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE telegram_bot_candidates
+                SET status=?, {time_field}=?, last_seen_at=MAX(last_seen_at, ?)
+                WHERE chat_id=? AND COALESCE(thread_id, 0)=COALESCE(?, 0) AND sender_id=?
+                """,
+                (normalized_status, now, now, int(chat_id), thread_id, int(sender_id)),
+            )
+        return cursor.rowcount == 1
 
     def remove_chat_binding_bot_id(
         self,

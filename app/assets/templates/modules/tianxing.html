@@ -8,7 +8,7 @@
 {% set reward_entries = rewards.entries or [] %}
 {% set wild_deep_log_export = wild_deep_log_export_result or {} %}
 {% set craft_loop_view = tx.craft_loop_view or {} %}
-{% set tianxing_stars = ['太阴', '贪狼'] %}
+{% set tianxing_stars = ['贪狼', '太阴'] %}
 {% set tianxing_routes = ['探索', '闭关', '炼制', '斗法'] %}
 {% set timeline_phase_labels = {
     'planning': '规划中',
@@ -517,7 +517,7 @@
                 定命策略
                 {% set selected_star = config.set_star_name if config.set_star_name in tianxing_stars else '' %}
                 <select name="set_star_name">
-                    <option value="" {% if not selected_star %}selected{% endif %}>日常：太阴优先，其次贪狼</option>
+                    <option value="" {% if not selected_star %}selected{% endif %}>日常：贪狼优先，其次太阴</option>
                     {% for star in tianxing_stars %}
                     <option value="{{ star }}" {% if selected_star == star %}selected{% endif %}>{{ star }}优先</option>
                     {% endfor %}
@@ -539,7 +539,7 @@
         <div class="stack-list compact-stack">
             <div class="kv-row"><span>观测/查盘</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_panel_enabled and config.auto_observe_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_panel_enabled and config.auto_observe_enabled else '关闭' }}</strong></div>
             <div class="kv-row"><span>自动定命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_set_star_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_set_star_enabled else '关闭' }}</strong></div>
-            <div class="kv-row"><span>定命策略</span><strong class="tianxing-summary-value tianxing-status-route">{{ (config.set_star_name ~ '优先') if config.set_star_name else '日常：太阴 > 贪狼' }}</strong></div>
+            <div class="kv-row"><span>定命策略</span><strong class="tianxing-summary-value tianxing-status-route">{{ (config.set_star_name ~ '优先') if config.set_star_name else '日常：贪狼 > 太阴' }}</strong></div>
             <div class="kv-row"><span>自动推命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_predict_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_predict_enabled else '关闭' }}</strong></div>
             <div class="kv-row"><span>自动改命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_change_fate_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_change_fate_enabled else '关闭' }}</strong></div>
             <div class="kv-row"><span>当前路线</span><strong><span class="tianxing-route-chip">探索</span></strong></div>

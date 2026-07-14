@@ -53,6 +53,8 @@ from tg_game.features.countdowns.biz_countdowns_view_model import (
     sort_countdown_items,
 )
 from tg_game.features.fishing.biz_fishing_view_model import build_fishing_view
+from tg_game.features.fishing import biz_fishing_daily_auto
+from tg_game.features.fishing import biz_fishing_miniapp as fishing_miniapp
 from tg_game.features.small_world.biz_small_world_view_model import (
     build_small_world_auto_view as _small_world_build_small_world_auto_view,
 )
@@ -685,12 +687,16 @@ def create_app() -> FastAPI:
         return storage.get_chat_binding(active_profile.id, chat_id)
 
     def _build_chat_binding_bot_ids_view(
-        binding, *, active_bot_ids: set[int] | None = None
+        binding,
+        *,
+        active_bot_ids: set[int] | None = None,
+        manual_live_bot_ids: set[int] | None = None,
     ) -> list[dict]:
         return _shared_build_chat_binding_bot_ids_view(
             storage,
             binding,
             active_bot_ids=active_bot_ids,
+            manual_live_bot_ids=manual_live_bot_ids,
         )
 
     def _ensure_chat_binding_bot_ids(profile_id: int, chat_id: int, thread_id=None) -> None:
@@ -2882,6 +2888,32 @@ def create_app() -> FastAPI:
         storage.remove_chat_binding_bot_id(profile_id, chat_id, bot_id, thread_id=binding.thread_id)
         return RedirectResponse(url=redirect_to or "/profile", status_code=303)
 
+    @application.post("/profiles/{profile_id}/chat-bindings/{chat_id}/bot-candidates/{sender_id}/decision")
+    async def decide_chat_binding_bot_candidate(
+        request: Request,
+        profile_id: int,
+        chat_id: int,
+        sender_id: int,
+        action: str = Form(...),
+        redirect_to: str = Form("/profile#chats"),
+    ) -> RedirectResponse:
+        if not _profile_belongs_to_session(request, profile_id):
+            raise HTTPException(status_code=403, detail="Profile not available in current session")
+        if int(chat_id) != int(settings.bound_chat_id):
+            raise HTTPException(status_code=409, detail="Candidate is not in the current bound chat")
+        if action not in {"trust", "reject"}:
+            raise HTTPException(status_code=400, detail="Invalid candidate action")
+        binding = storage.get_chat_binding(profile_id, chat_id)
+        if not binding:
+            raise HTTPException(status_code=404, detail="Chat binding not found")
+        result = await bot_sync_web.run_bot_candidate_action(
+            sender_id,
+            trust=action == "trust",
+        )
+        if not result.get("ok"):
+            raise HTTPException(status_code=409, detail=result.get("message") or "Candidate action failed")
+        return RedirectResponse(url=redirect_to or "/profile#chats", status_code=303)
+
     @application.post("/modules/{module_key}/settings")
     async def save_module_setting(
         module_key: str,
@@ -3980,10 +4012,9 @@ def create_app() -> FastAPI:
         clean_bait = str(
             bait or (existing or {}).get("bait") or biz_fishing_game.FISHING_DEFAULT_BAIT
         ).strip() or biz_fishing_game.FISHING_DEFAULT_BAIT
-        command_text = biz_fishing_game.build_start_command(clean_pond, clean_bait)
         now = biz_fanren_game.time.time()
         daily_count = 0
-        daily_limit = biz_fishing_game.FISHING_DAILY_LIMIT
+        daily_limit = fishing_miniapp.FISHING_MINIAPP_DAILY_LIMIT_FALLBACK
         if existing:
             try:
                 daily_count = max(int(existing.get("daily_count") or 0), 0)
@@ -3992,19 +4023,22 @@ def create_app() -> FastAPI:
             try:
                 daily_limit = max(int(existing.get("daily_limit") or daily_limit), 1)
             except (TypeError, ValueError):
-                daily_limit = biz_fishing_game.FISHING_DAILY_LIMIT
-        target_limit = daily_count + 1 if one_cast else max(daily_limit, daily_count)
+                daily_limit = fishing_miniapp.FISHING_MINIAPP_DAILY_LIMIT_FALLBACK
+            if not biz_fishing_daily_auto.is_same_local_day(
+                float(existing.get("last_action_at") or 0),
+                now,
+            ):
+                daily_count = 0
         state = "miniapp_canary" if one_cast else "miniapp_batch"
         last_error = (
-            "MiniApp 试钓已排队，等待 bot 回包入口。"
+            "MiniApp 试钓已登记，等待 Telegram runtime 使用公共洞府入口执行。"
             if one_cast
-            else "MiniApp 钓满今日已排队，等待 bot 回包入口。"
+            else "MiniApp 钓满今日已登记，等待 Telegram runtime 使用公共洞府入口执行。"
         )
-        limit_reached = (not one_cast) and daily_count >= target_limit
+        limit_reached = daily_limit > 0 and daily_count >= daily_limit
         if limit_reached:
             state = "finished"
             last_error = "今日竿数已满，未排队 MiniApp 钓鱼。"
-            target_limit = max(target_limit, 1)
         if existing:
             storage.update_fishing_session(
                 int(existing["id"]),
@@ -4018,9 +4052,10 @@ def create_app() -> FastAPI:
                 auto_nest=False,
                 auto_until_limit=True,
                 state=state,
-                daily_limit=target_limit,
-                last_command_text=command_text,
-                next_action_at=0,
+                daily_count=daily_count,
+                daily_limit=daily_limit,
+                last_command_text="MiniApp 公共洞府直连",
+                next_action_at=now if not limit_reached else 0,
                 last_action_at=now,
                 last_error=last_error,
             )
@@ -4039,20 +4074,11 @@ def create_app() -> FastAPI:
                 auto_until_limit=True,
                 state=state,
                 daily_count=0,
-                daily_limit=target_limit,
-                last_command_text=command_text,
-                next_action_at=0,
+                daily_limit=daily_limit,
+                last_command_text="MiniApp 公共洞府直连",
+                next_action_at=now if not limit_reached else 0,
                 last_action_at=now,
                 last_error=last_error,
-            )
-        if not limit_reached:
-            storage.enqueue_outgoing_command(
-                profile_id=profile.id,
-                chat_id=resolved_chat_id,
-                text=command_text,
-                thread_id=resolved_thread_id,
-                chat_type=chat_type,
-                bot_username=bot_username,
             )
         return RedirectResponse(url=redirect_to, status_code=303)
 
@@ -4101,6 +4127,106 @@ def create_app() -> FastAPI:
             redirect_to=redirect_to,
             one_cast=False,
         )
+
+    @application.post("/runtime/fishing/miniapp-daily-auto")
+    async def runtime_toggle_fishing_miniapp_daily_auto(
+        request: Request,
+        chat_id: str = Form(...),
+        pond: str = Form(biz_fishing_game.FISHING_DEFAULT_POND),
+        bait: str = Form(biz_fishing_game.FISHING_DEFAULT_BAIT),
+        run_time: str = Form(biz_fishing_daily_auto.DEFAULT_RUN_TIME),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/fishing"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Chat ID not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        feature_key = biz_fishing_daily_auto.FEATURE_KEY
+        existing_task = storage.get_companion_auto_task(
+            profile.id,
+            resolved_chat_id,
+            feature_key,
+        )
+        existing_session = storage.get_fishing_session(profile.id, resolved_chat_id)
+        if existing_task and bool(existing_task.get("enabled")):
+            storage.disable_companion_auto_task(
+                profile.id,
+                resolved_chat_id,
+                feature_key,
+                last_error="用户手动关闭每日灵溪垂钓。",
+            )
+            if existing_session and str(existing_session.get("state") or "") == "miniapp_batch":
+                storage.update_fishing_session(
+                    int(existing_session["id"]),
+                    enabled=False,
+                    state="stopped",
+                    next_action_at=0,
+                    last_error="用户手动关闭每日灵溪垂钓。",
+                )
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        session_view = _build_fishing_view(existing_session)
+        if not session_view.get("canary_passed"):
+            raise HTTPException(status_code=409, detail="请先完成一次真实 MiniApp 试钓")
+        clean_pond = str(pond or session_view.get("pond") or biz_fishing_game.FISHING_DEFAULT_POND).strip()
+        clean_bait = str(bait or session_view.get("bait") or biz_fishing_game.FISHING_DEFAULT_BAIT).strip()
+        if existing_session:
+            storage.update_fishing_session(
+                int(existing_session["id"]),
+                pond=clean_pond,
+                bait=clean_bait,
+                enabled=False,
+            )
+        else:
+            storage.upsert_fishing_session(
+                profile_id=profile.id,
+                chat_id=resolved_chat_id,
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
+                enabled=False,
+                pond=clean_pond,
+                bait=clean_bait,
+                daily_limit=fishing_miniapp.FISHING_MINIAPP_DAILY_LIMIT_FALLBACK,
+            )
+        normalized_run_time = biz_fishing_daily_auto.normalize_run_time(run_time)
+        now_ts = biz_fanren_game.time.time()
+        attempted_today = biz_fishing_daily_auto.is_same_local_day(
+            float((existing_task or {}).get("last_run_at") or 0),
+            now_ts,
+        )
+        next_run_at = biz_fishing_daily_auto.resolve_next_run_at(
+            normalized_run_time,
+            now=now_ts,
+            attempted_today=attempted_today,
+        )
+        task = storage.upsert_companion_auto_task(
+            profile_id=profile.id,
+            chat_id=resolved_chat_id,
+            feature_key=feature_key,
+            enabled=True,
+            strategy=normalized_run_time,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+            next_run_at=next_run_at,
+            last_run_at=float((existing_task or {}).get("last_run_at") or 0),
+            last_error=(
+                biz_fishing_daily_auto.COMPLETED_TODAY_ERROR if attempted_today else ""
+            ),
+        )
+        storage.update_companion_auto_task(int(task["id"]), workflow_state="")
+        return RedirectResponse(url=redirect_to, status_code=303)
 
     @application.post("/runtime/commands/pagoda-auto")
     async def runtime_toggle_pagoda_auto(

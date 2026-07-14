@@ -1,6 +1,7 @@
 from typing import Optional
 import biz_fanren_game
 import biz_fishing_game
+from tg_game.features.fishing import biz_fishing_daily_auto
 from tg_game.features.fishing.biz_fishing_miniapp_entry import parse_miniapp_entry_block
 
 FISHING_STATE_LABELS = {
@@ -12,8 +13,10 @@ FISHING_STATE_LABELS = {
     "hook_ready": "可提竿",
     "catch_success": "提竿成功",
     "empty_hook": "空竿",
-    "miniapp_canary": "等待 MiniApp 入口",
-    "miniapp_batch": "等待 MiniApp 批量入口",
+    "miniapp_canary": "等待 MiniApp 试钓",
+    "miniapp_batch": "等待 MiniApp 钓满今日",
+    "miniapp_canary_running": "MiniApp 试钓中",
+    "miniapp_batch_running": "MiniApp 钓满今日中",
     "miniapp": "MiniApp 接管中",
     "miniapp_failed": "MiniApp 失败",
     "limit_checking": "满杆复核中",
@@ -44,8 +47,9 @@ def _sorted_items(value: object) -> list[tuple]:
     return sorted(value.items(), key=lambda item: item[0]) if isinstance(value, dict) else []
 
 
-def build_fishing_view(raw_session: Optional[dict]) -> dict:
+def build_fishing_view(raw_session: Optional[dict], daily_task: Optional[dict] = None) -> dict:
     session = raw_session or {}
+    task = daily_task or {}
     state = _session_text(session, "state", "idle")
     daily_count = max(_int_value(session.get("daily_count")), 0)
     daily_limit = max(
@@ -73,6 +77,12 @@ def build_fishing_view(raw_session: Optional[dict]) -> dict:
     )
 
     last_result_text = _session_text(session, "last_result_text")
+    canary_passed = (
+        state in {"catch_success", "finished"}
+        and "MiniApp" in last_result_text
+        and not _session_text(session, "last_error")
+    )
+    daily_next_run_at = _float_value(task.get("next_run_at"))
 
     return {
         "raw": session,
@@ -104,6 +114,18 @@ def build_fishing_view(raw_session: Optional[dict]) -> dict:
         "catches": _sorted_items(session.get("catches")),
         "last_fish_name": _session_text(session, "last_fish_name", "-"),
         "last_result_text": last_result_text,
+        "canary_passed": canary_passed,
+        "daily_auto_enabled": bool(_int_value(task.get("enabled"))),
+        "daily_run_time": biz_fishing_daily_auto.normalize_run_time(
+            task.get("strategy") or biz_fishing_daily_auto.DEFAULT_RUN_TIME
+        ),
+        "daily_next_run_at": daily_next_run_at,
+        "daily_next_run_display": (
+            biz_fanren_game.format_timestamp(daily_next_run_at)
+            if daily_next_run_at
+            else "-"
+        ),
+        "daily_last_error": _session_text(task, "last_error"),
         "miniapp_entry": parse_miniapp_entry_block(last_result_text),
         "last_command_text": _session_text(session, "last_command_text"),
         "last_error": _session_text(session, "last_error"),

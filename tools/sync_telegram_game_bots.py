@@ -33,6 +33,15 @@ PROGRESS_PATH = PROJECT_ROOT / "progress.md"
 BOT_SCAN_SNAPSHOT_PATH = DATA_DIR / "telegram_game_bot_scan.json"
 BOT_SYNC_LOCK_PATH = DATA_DIR / "telegram_game_bot_sync.lock"
 GAME_BOT_PATTERN = re.compile(r"^hantianzun(\d+)_bot$", re.IGNORECASE)
+BOT_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+_bot$", re.IGNORECASE)
+GAME_COMMAND_PREFIXES = (
+    ".天机盘", ".野外历练", ".探寻裂缝", ".鱼篓", ".小世界",
+    ".我的侍妾", ".远航", ".闭关", ".观命", ".定命", ".推命", ".改命",
+)
+GAME_REPLY_MARKERS = (
+    "【天机盘】", "【野外历练", "【鱼篓】", "【乱星海远航", "【闭关",
+    "【小世界", "推命", "改命", "今日可选命星",
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,19 @@ class BotIdentity:
     bot_id: int
     username: str
     sources: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BotCandidateEvidence:
+    bot_id: int
+    username: str
+    telegram_bot_flag: bool
+    evidence_count: int
+    command_families: tuple[str, ...]
+    sample_message_id: int
+    sample_reply_to_msg_id: int
+    sample_text: str
+    confidence_score: int
 
 
 @dataclass
@@ -175,10 +197,16 @@ def load_local_state(
                 "FROM profiles ORDER BY is_active DESC, id"
             )
         ]
+        binding_columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(chat_bindings)")
+        }
+        telegram_user_select = (
+            "telegram_user_id" if "telegram_user_id" in binding_columns else "'' AS telegram_user_id"
+        )
         rows = connection.execute(
-            """
+            f"""
             SELECT id, profile_id, chat_id, thread_id, bot_id, bot_ids,
-                   bot_usernames, is_active
+                   bot_usernames, {telegram_user_select}, is_active
             FROM chat_bindings
             WHERE chat_id=? AND COALESCE(thread_id, 0)=COALESCE(?, 0)
             ORDER BY profile_id, id
@@ -230,6 +258,172 @@ def build_target_state(
     for bot in observed_sorted:
         usernames[bot.bot_id] = bot.username
     return target_ids, usernames
+
+
+def _game_command_family(text: str) -> str:
+    normalized = str(text or "").strip()
+    for prefix in GAME_COMMAND_PREFIXES:
+        if normalized.startswith(prefix):
+            return prefix
+    return ""
+
+
+def _is_recognized_game_reply(text: str) -> bool:
+    normalized = str(text or "").strip()
+    return any(marker in normalized for marker in GAME_REPLY_MARKERS)
+
+
+def discover_nonstandard_bot_evidence(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int | None,
+    trusted_ids: list[int],
+) -> tuple[list[int], list[BotCandidateEvidence]]:
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        if not {"bound_messages", "chat_bindings"}.issubset(tables):
+            return [], []
+        rows = connection.execute(
+            """
+            SELECT child.sender_id, child.sender_username, child.is_bot,
+                   child.message_id, child.reply_to_msg_id, child.text,
+                   parent.text AS parent_text, parent.sender_id AS parent_sender_id,
+                   binding.telegram_user_id
+            FROM bound_messages child
+            JOIN bound_messages parent
+              ON parent.profile_id=child.profile_id
+             AND parent.chat_id=child.chat_id
+             AND parent.message_id=child.reply_to_msg_id
+            JOIN chat_bindings binding
+              ON binding.profile_id=child.profile_id
+             AND binding.chat_id=child.chat_id
+             AND COALESCE(binding.thread_id, 0)=COALESCE(child.thread_id, 0)
+            WHERE child.chat_id=?
+              AND COALESCE(child.thread_id, 0)=COALESCE(?, 0)
+              AND child.reply_to_msg_id IS NOT NULL
+              AND parent.direction='outgoing'
+            ORDER BY child.updated_at DESC, child.id DESC
+            LIMIT 10000
+            """,
+            (int(chat_id), thread_id),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    trusted = {int(value) for value in trusted_ids}
+    evidence: dict[int, dict] = {}
+    manual_live: set[int] = set()
+    for row in rows:
+        sender_id = int(row["sender_id"] or 0)
+        username = str(row["sender_username"] or "").strip().lstrip("@")
+        if sender_id <= 0 or not BOT_USERNAME_PATTERN.fullmatch(username):
+            continue
+        if str(row["parent_sender_id"] or "") != str(row["telegram_user_id"] or ""):
+            continue
+        family = _game_command_family(row["parent_text"])
+        if not family or not _is_recognized_game_reply(row["text"]):
+            continue
+        if sender_id in trusted and not is_game_bot_username(username):
+            manual_live.add(sender_id)
+            continue
+        if sender_id in trusted or bool(row["is_bot"]):
+            continue
+        item = evidence.setdefault(
+            sender_id,
+            {
+                "username": username,
+                "families": set(),
+                "count": 0,
+                "message_id": int(row["message_id"] or 0),
+                "reply_to": int(row["reply_to_msg_id"] or 0),
+                "sample": str(row["text"] or "")[:500],
+            },
+        )
+        item["count"] += 1
+        item["families"].add(family)
+
+    candidates = []
+    for sender_id, item in evidence.items():
+        score = 10 + min(item["count"] - 1, 3) + min(len(item["families"]) - 1, 2)
+        if score < 7:
+            continue
+        candidates.append(
+            BotCandidateEvidence(
+                bot_id=sender_id,
+                username=item["username"],
+                telegram_bot_flag=False,
+                evidence_count=item["count"],
+                command_families=tuple(sorted(item["families"])),
+                sample_message_id=item["message_id"],
+                sample_reply_to_msg_id=item["reply_to"],
+                sample_text=item["sample"],
+                confidence_score=score,
+            )
+        )
+    candidates.sort(key=lambda item: (-item.confidence_score, -item.evidence_count, item.username))
+    return sorted(manual_live), candidates
+
+
+def persist_bot_candidates(
+    database_path: Path,
+    chat_id: int,
+    thread_id: int | None,
+    candidates: list[BotCandidateEvidence],
+) -> None:
+    now = time.time()
+    connection = sqlite3.connect(database_path, timeout=30)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_bot_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL,
+                thread_id INTEGER, sender_id INTEGER NOT NULL, username TEXT NOT NULL DEFAULT '',
+                telegram_bot_flag INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending_confirm', evidence_count INTEGER NOT NULL DEFAULT 0,
+                command_families TEXT NOT NULL DEFAULT '[]', sample_message_id INTEGER NOT NULL DEFAULT 0,
+                sample_reply_to_msg_id INTEGER NOT NULL DEFAULT 0, sample_text TEXT NOT NULL DEFAULT '',
+                confidence_score INTEGER NOT NULL DEFAULT 0, first_seen_at REAL NOT NULL,
+                last_seen_at REAL NOT NULL, confirmed_at REAL NOT NULL DEFAULT 0,
+                rejected_at REAL NOT NULL DEFAULT 0, UNIQUE(chat_id, thread_id, sender_id)
+            )
+            """
+        )
+        for item in candidates:
+            connection.execute(
+                """
+                INSERT INTO telegram_bot_candidates
+                    (chat_id, thread_id, sender_id, username, telegram_bot_flag, status,
+                     evidence_count, command_families, sample_message_id,
+                     sample_reply_to_msg_id, sample_text, confidence_score,
+                     first_seen_at, last_seen_at)
+                VALUES (?, ?, ?, ?, ?, 'pending_confirm', ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, thread_id, sender_id) DO UPDATE SET
+                    username=excluded.username,
+                    telegram_bot_flag=excluded.telegram_bot_flag,
+                    evidence_count=excluded.evidence_count,
+                    command_families=excluded.command_families,
+                    sample_message_id=excluded.sample_message_id,
+                    sample_reply_to_msg_id=excluded.sample_reply_to_msg_id,
+                    sample_text=excluded.sample_text,
+                    confidence_score=excluded.confidence_score,
+                    last_seen_at=excluded.last_seen_at
+                """,
+                (
+                    int(chat_id), thread_id, item.bot_id, item.username,
+                    1 if item.telegram_bot_flag else 0, item.evidence_count,
+                    json.dumps(item.command_families, ensure_ascii=False, separators=(",", ":")),
+                    item.sample_message_id, item.sample_reply_to_msg_id,
+                    item.sample_text, item.confidence_score, now, now,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 async def resolve_group(client: TelegramClient, chat_id: int):
@@ -384,7 +578,11 @@ def write_scan_snapshot(
     message_count: int,
     scan_profile_id: int,
     observed_bots: list[BotIdentity],
+    manual_live_bot_ids: list[int] | None = None,
+    candidates: list[BotCandidateEvidence] | None = None,
 ) -> None:
+    manual_live_bot_ids = manual_live_bot_ids or []
+    candidates = candidates or []
     payload = {
         "chat_id": int(chat_id),
         "thread_id": int(thread_id) if thread_id is not None else None,
@@ -393,6 +591,9 @@ def write_scan_snapshot(
         "message_count": int(message_count),
         "scan_profile_id": int(scan_profile_id),
         "bot_ids": [int(bot.bot_id) for bot in observed_bots],
+        "official_live_bot_ids": [int(bot.bot_id) for bot in observed_bots],
+        "manual_live_bot_ids": [int(value) for value in manual_live_bot_ids],
+        "candidate_bot_ids": [int(item.bot_id) for item in candidates],
     }
     atomic_write(
         path,
@@ -515,6 +716,83 @@ def verify_sync(
         raise RuntimeError(f"SQLite 存在 {len(foreign_keys)} 条外键违规")
 
 
+def apply_candidate_decision(
+    database_path: Path,
+    env_path: Path,
+    chat_id: int,
+    thread_id: int | None,
+    sender_id: int,
+    *,
+    trust: bool,
+) -> Path:
+    backup = create_database_backup(database_path)
+    original_env = env_path.read_text(encoding="utf-8")
+    env_written = False
+    connection = sqlite3.connect(database_path, timeout=30)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        candidate = connection.execute(
+            """
+            SELECT * FROM telegram_bot_candidates
+            WHERE chat_id=? AND COALESCE(thread_id, 0)=COALESCE(?, 0)
+              AND sender_id=? AND status='pending_confirm'
+            """,
+            (int(chat_id), thread_id, int(sender_id)),
+        ).fetchone()
+        if not candidate:
+            raise RuntimeError("候选 Bot 不存在或已处理")
+        now = time.time()
+        if not trust:
+            connection.execute(
+                "UPDATE telegram_bot_candidates SET status='rejected', rejected_at=?, last_seen_at=MAX(last_seen_at, ?) WHERE id=?",
+                (now, now, int(candidate["id"])),
+            )
+            connection.commit()
+            return backup
+
+        state = load_local_state(database_path, chat_id, thread_id)
+        if state.blockers:
+            raise RuntimeError("存在绑定阻塞项，拒绝信任候选 Bot")
+        env_values = parse_env(env_path)
+        env_ids = parse_int_list(env_values.get("TG_GAME_ALLOWED_BOT_IDS", ""))
+        target_ids = merge_ids(env_ids, *[item["bot_ids"] for item in state.bindings], [sender_id])
+        usernames: dict[int, str] = {}
+        for binding in state.bindings:
+            usernames.update(binding["bot_usernames"])
+        usernames[int(sender_id)] = str(candidate["username"] or "").strip().lstrip("@")
+        update_bindings_in_connection(
+            connection,
+            [int(binding["id"]) for binding in state.bindings],
+            target_ids,
+            usernames,
+        )
+        connection.execute(
+            "UPDATE bound_messages SET is_bot=1, updated_at=? WHERE chat_id=? AND sender_id=?",
+            (now, int(chat_id), int(sender_id)),
+        )
+        connection.execute(
+            "UPDATE telegram_bot_candidates SET status='trusted', confirmed_at=?, last_seen_at=MAX(last_seen_at, ?) WHERE id=?",
+            (now, now, int(candidate["id"])),
+        )
+        new_env = replace_env_value(
+            original_env,
+            "TG_GAME_ALLOWED_BOT_IDS",
+            ",".join(str(value) for value in target_ids),
+        )
+        atomic_write(env_path, new_env)
+        env_written = True
+        connection.commit()
+        return backup
+    except Exception:
+        connection.rollback()
+        if env_written:
+            atomic_write(env_path, original_env)
+        raise
+    finally:
+        connection.close()
+
+
 def append_progress(
     new_bots: list[BotIdentity],
     previous_ids: list[int],
@@ -561,7 +839,11 @@ def print_report(
     env_ids: list[int],
     local_state: LocalState,
     target_ids: list[int],
+    manual_live_bot_ids: list[int] | None = None,
+    candidates: list[BotCandidateEvidence] | None = None,
 ) -> None:
+    manual_live_bot_ids = manual_live_bot_ids or []
+    candidates = candidates or []
     local_ids = set(env_ids)
     for binding in local_state.bindings:
         local_ids.update(binding["bot_ids"])
@@ -581,6 +863,8 @@ def print_report(
             f"profile {binding['profile_id']} Bot 数: {len(binding['bot_ids'])}"
         )
     print(f"同步后目标 Bot 数: {len(target_ids)}")
+    print(f"手工可信近期活跃 Bot: {len(manual_live_bot_ids)}")
+    print(f"待确认候选 Bot: {len(candidates)}")
     if retained_old:
         print("保留的旧轮换 Bot ID: " + ",".join(str(value) for value in retained_old))
     if local_state.blockers:
@@ -596,6 +880,8 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="只检查，不修改")
     mode.add_argument("--apply", action="store_true", help="备份后同步 .env 和数据库")
+    mode.add_argument("--trust-candidate", type=int, help="确认候选 Bot 数字 ID")
+    mode.add_argument("--reject-candidate", type=int, help="忽略候选 Bot 数字 ID")
     parser.add_argument(
         "--message-limit",
         type=int,
@@ -616,6 +902,21 @@ def main() -> int:
     env_ids = parse_int_list(env_values.get("TG_GAME_ALLOWED_BOT_IDS", ""))
     local_state = load_local_state(DATABASE_PATH, chat_id, thread_id)
 
+    candidate_id = args.trust_candidate or args.reject_candidate
+    if candidate_id:
+        backup = apply_candidate_decision(
+            DATABASE_PATH,
+            ENV_PATH,
+            chat_id,
+            thread_id,
+            candidate_id,
+            trust=bool(args.trust_candidate),
+        )
+        action = "已加入可信列表" if args.trust_candidate else "已忽略"
+        print(f"候选 Bot {candidate_id} {action}。")
+        print(f"数据库备份: {backup}")
+        return 0
+
     title, message_count, observed_bots, scan_profile_id = asyncio.run(
         scan_group(local_state, chat_id, args.message_limit)
     )
@@ -630,6 +931,12 @@ def main() -> int:
     target_ids, target_usernames = build_target_state(
         env_ids, local_state, observed_bots
     )
+    manual_live_bot_ids, candidates = discover_nonstandard_bot_evidence(
+        DATABASE_PATH,
+        chat_id,
+        thread_id,
+        target_ids,
+    )
     print_report(
         title,
         chat_id,
@@ -639,6 +946,8 @@ def main() -> int:
         env_ids,
         local_state,
         target_ids,
+        manual_live_bot_ids,
+        candidates,
     )
 
     if not args.apply:
@@ -672,7 +981,11 @@ def main() -> int:
             message_count=message_count,
             scan_profile_id=scan_profile_id,
             observed_bots=observed_bots,
+            manual_live_bot_ids=manual_live_bot_ids,
+            candidates=candidates,
         )
+        if candidates:
+            persist_bot_candidates(DATABASE_PATH, chat_id, thread_id, candidates)
         print("本地已经与群上 Bot 清单同步；已更新最近扫描状态。")
         return 0
 
@@ -700,7 +1013,11 @@ def main() -> int:
         message_count=message_count,
         scan_profile_id=scan_profile_id,
         observed_bots=observed_bots,
+        manual_live_bot_ids=manual_live_bot_ids,
+        candidates=candidates,
     )
+    if candidates:
+        persist_bot_candidates(DATABASE_PATH, chat_id, thread_id, candidates)
 
     append_progress(
         new_bots,

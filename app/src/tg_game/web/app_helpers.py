@@ -1345,8 +1345,10 @@ def _build_divination_batch_view(raw_batch: Optional[dict]) -> dict:
     return _other_build_divination_batch_view(raw_batch)
 
 
-def _build_fishing_view(raw_session: Optional[dict]) -> dict:
-    return build_fishing_view(raw_session)
+def _build_fishing_view(
+    raw_session: Optional[dict], daily_task: Optional[dict] = None
+) -> dict:
+    return build_fishing_view(raw_session, daily_task)
 
 
 def _list_dungeon_feed_source_messages(
@@ -1844,4 +1846,3 @@ def _build_rift_failure_profile_state(
         "dao_name": str((payload or {}).get("dao_name") or "").strip(),
         "stage_name": str((payload or {}).get("cultivation_level") or "").strip(),
     }
-

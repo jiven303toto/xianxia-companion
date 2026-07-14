@@ -4805,10 +4805,29 @@ p.muted {
     color: var(--text-muted);
 }
 
+.profile-bot-status.is-manual {
+    color: #9a6700;
+    border-color: rgba(154, 103, 0, 0.28);
+    background: rgba(255, 196, 0, 0.08);
+}
+
 .profile-bot-status.is-pending {
     border-color: rgba(245, 158, 11, 0.36);
     background: rgba(245, 158, 11, 0.08);
     color: var(--warning);
+}
+
+.profile-bot-candidate-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.profile-bot-candidate-row p {
+    margin: 6px 0 0;
 }
 
 .profile-bot-empty {

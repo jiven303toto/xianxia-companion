@@ -1,0 +1,171 @@
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>本命法宝</p>
+            <h2>法宝与器灵</h2>
+        </div>
+        <div class="stack-list">
+            <div class="kv-row"><span>御使法宝</span><strong>{{ equipped_artifact_name or '未装备法宝' }}</strong></div>
+            <div class="kv-row"><span>灵石</span><strong style="color: var(--accent-gold);">{{ spirit_stones }}</strong></div>
+            <div class="kv-row"><span>已炼器图纸</span><strong>{{ recipes_known_text }}</strong></div>
+        </div>
+        <div class="top-gap">
+            <p class="muted">已装备法宝详情</p>
+            <div class="message-text">{{ equipped_artifact_details }}</div>
+        </div>
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>快捷指令</p>
+            <h2>器灵养护</h2>
+        </div>
+        <div class="artifact-command-grid">
+            {% set artifact_actions = [
+                ('查看状态', '.状态'),
+                ('我的器灵', '.我的器灵'),
+                ('抚摸法宝', '.抚摸法宝'),
+                ('唤醒器灵', '.唤醒器灵'),
+                ('一键修理', '.一键修理')
+            ] %}
+            {% for label, command in artifact_actions %}
+            <form method="post" action="/runtime/commands/send-raw">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/artifact">
+                <input type="hidden" name="text" value="{{ command }}">
+                <button class="artifact-command-btn" type="submit" {% if not command_chat_ready %}disabled{% endif %}>{{ label }}</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% if not command_chat_ready %}
+        <p class="muted top-gap">当前未绑定有效游戏群，无法直接发送法宝指令。</p>
+        {% endif %}
+    </div>
+
+    {% set artifact_touch_command_text = artifact_touch_auto_state.command_text or '' %}
+    {% set artifact_trial_default = artifact_trial_auto_state.artifact_name or artifact_touch_command_text.replace('.抚摸法宝', '').strip() or equipped_artifact_name or '玄天斩灵剑' %}
+    <div class="detail-card" data-artifact-tabs>
+        <div class="section-header compact">
+            <p>定时抚摸 / 器灵试炼</p>
+            <h2>法宝器灵</h2>
+        </div>
+        <div class="artifact-card-tab-row" role="tablist" aria-label="法宝器灵操作">
+            <button type="button" class="inline-button artifact-card-tab active" data-artifact-tab-target="touch" role="tab" aria-selected="true">定时抚摸</button>
+            <button type="button" class="inline-button artifact-card-tab" data-artifact-tab-target="trial" role="tab" aria-selected="false">器灵试炼</button>
+        </div>
+        <div data-artifact-tab-panel="touch">
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>状态</span><strong style="color: {% if artifact_touch_auto_state.active %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ '运行中' if artifact_touch_auto_state.active else '未启动' }}</strong></div>
+                <div class="kv-row"><span>下次执行</span><strong {% if artifact_touch_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ artifact_touch_auto_state.next_run_target }}"{% endif %}>{{ artifact_touch_auto_state.next_run_display }}</strong></div>
+            </div>
+            <form class="form-grid top-gap" method="post" action="/runtime/artifact/touch-auto">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/artifact">
+                <label class="full-span">
+                    抚摸指令
+                    <input name="command_text" value="{{ artifact_touch_auto_state.command_text }}" placeholder=".抚摸法宝 青竹蜂云剑（神雷版）" {% if artifact_touch_auto_state.active %}readonly{% endif %} required>
+                </label>
+                <label>
+                    间隔分钟
+                    <input name="interval_minutes" type="number" min="5" value="{{ artifact_touch_auto_state.interval_minutes }}" {% if artifact_touch_auto_state.active %}readonly{% endif %} required>
+                </label>
+                <div class="action-row" style="align-items: end;">
+                    <button type="submit" class="inline-button auto-toggle-button{% if artifact_touch_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动抚摸' if artifact_touch_auto_state.active else '开启自动抚摸' }}</button>
+                </div>
+            </form>
+            {% if artifact_touch_auto_state.last_error %}
+            <p class="muted top-gap">{{ artifact_touch_auto_state.last_error }}</p>
+            {% endif %}
+        </div>
+        <div data-artifact-tab-panel="trial" hidden>
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>状态</span><strong style="color: {% if artifact_trial_auto_state.active %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ '运行中' if artifact_trial_auto_state.active else '未启动' }}</strong></div>
+                <div class="kv-row"><span>下次执行</span><strong {% if artifact_trial_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ artifact_trial_auto_state.next_run_target }}"{% endif %}>{{ artifact_trial_auto_state.next_run_display }}</strong></div>
+                <div class="kv-row"><span>灵石</span><strong>{{ artifact_trial_auto_state.resources.spirit_stones }} / {{ artifact_trial_auto_state.resources.spirit_stone_cost }}</strong></div>
+                <div class="kv-row"><span>养魂木</span><strong>{{ artifact_trial_auto_state.resources.soul_wood }} / {{ artifact_trial_auto_state.resources.soul_wood_cost }}</strong></div>
+            </div>
+            <form class="form-grid top-gap" method="post" action="/runtime/artifact/trial-auto">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/artifact">
+                <label class="full-span">
+                    法宝名
+                    <input name="artifact_name" value="{{ artifact_trial_default }}" placeholder="玄天斩灵剑" {% if artifact_trial_auto_state.active %}readonly{% endif %} required>
+                </label>
+                <label>
+                    试炼路线
+                    <select name="trial_route" {% if artifact_trial_auto_state.active %}disabled{% endif %}>
+                        {% for option in artifact_trial_auto_state.route_options %}
+                        <option value="{{ option }}" {% if artifact_trial_auto_state.trial_route == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if artifact_trial_auto_state.active %}
+                    <input type="hidden" name="trial_route" value="{{ artifact_trial_auto_state.trial_route }}">
+                    {% endif %}
+                </label>
+                <div class="action-row" style="align-items: end;">
+                    <button type="submit" class="inline-button auto-toggle-button{% if artifact_trial_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动试炼' if artifact_trial_auto_state.active else '开启自动试炼' }}</button>
+                </div>
+            </form>
+            <p class="muted top-gap">启动前检查灵石和养魂木；发送后只使用当前 profile 自己命令对应的 bot 回包更新冷却。</p>
+            {% if artifact_trial_auto_state.last_error %}
+            <p class="muted top-gap">{{ artifact_trial_auto_state.last_error }}</p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>手动补充</p>
+            <h2>发送法宝指令</h2>
+        </div>
+        <form class="form-grid top-gap" method="post" action="/runtime/commands/send-raw">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/artifact">
+            <label class="full-span">
+                指令
+                <input name="text" placeholder="例如：.修理 法宝名 / .抚摸法宝" required>
+            </label>
+            <div class="full-span action-row">
+                <button type="submit" {% if not command_chat_ready %}disabled{% endif %}>发送到游戏群</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<script>
+function mountArtifactCardTabs() {
+    document.querySelectorAll('[data-artifact-tabs]').forEach((card) => {
+        const tabs = Array.from(card.querySelectorAll('[data-artifact-tab-target]'));
+        const panels = Array.from(card.querySelectorAll('[data-artifact-tab-panel]'));
+        const activate = (target) => {
+            tabs.forEach((tab) => {
+                const active = tab.dataset.artifactTabTarget === target;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', String(active));
+            });
+            panels.forEach((panel) => {
+                panel.hidden = panel.dataset.artifactTabPanel !== target;
+            });
+        };
+        tabs.forEach((tab) => {
+            tab.addEventListener('click', () => activate(tab.dataset.artifactTabTarget));
+        });
+    });
+}
+
+mountArtifactCardTabs();
+</script>

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact-hero">
+    <p class="eyebrow">中枢敕令</p>
+    <h1>诸元神巡令</h1>
+    <p class="hero-text">统一调度全部元神的每日事务；洞府与天机走 MiniApp，古塔按元神间隔发送。</p>
+</section>
+
+<section
+    class="admin-execution-grid"
+    data-admin-execution-page
+    data-status-url="/admin/global-execution/status"
+    data-active="{{ '1' if admin_execution.active else '0' }}"
+    data-loading-message="{{ admin_execution.loading_message }}"
+>
+    {% for card in admin_execution.cards %}
+    <article class="detail-card admin-execution-card" data-admin-execution-card="{{ card.kind }}">
+        <div class="section-header compact admin-execution-header">
+            <div>
+                <p>每日巡令</p>
+                <h2>{{ card.title }}</h2>
+            </div>
+            <span class="admin-execution-status is-{{ card.status }}">{{ card.status_label }}</span>
+        </div>
+
+        <form class="admin-execution-schedule" method="post" action="/admin/global-execution/{{ card.kind }}/schedule">
+            <label class="admin-execution-schedule-toggle">
+                <input type="checkbox" name="enabled" value="1" {% if card.schedule.enabled %}checked{% endif %}>
+                <span>每日自动执行</span>
+            </label>
+            <label class="admin-execution-schedule-time">
+                <span>触发时间</span>
+                <input type="time" name="run_time" value="{{ card.schedule.run_time }}" required>
+            </label>
+            <button type="submit" class="inline-button">保存计划</button>
+        </form>
+
+        <div class="admin-execution-schedule-meta">
+            <div><span>上次自动执行</span><strong>{{ card.schedule.last_run_display }}</strong></div>
+            <div><span>下次自动执行</span><strong>{{ card.schedule.next_run_display }}</strong></div>
+        </div>
+
+        <form
+            method="post"
+            action="/admin/global-execution/{{ card.kind }}"
+            data-admin-execution-form
+        >
+            <button type="submit" class="button admin-execution-button" {% if admin_execution.active %}disabled{% endif %}>{{ card.button }}</button>
+        </form>
+
+        <div class="admin-execution-summary">
+            <div><span>执行时间</span><strong>{{ card.started_at }}</strong></div>
+            <div><span>成功</span><strong>{{ card.counts.success }}</strong></div>
+            <div><span>失败</span><strong>{{ card.counts.failed }}</strong></div>
+            <div><span>无需执行</span><strong>{{ card.counts.skipped }}</strong></div>
+        </div>
+
+        <details class="admin-execution-report" {% if card.status == 'running' %}open{% endif %}>
+            <summary>元神执行录（{{ card.done }}/{{ card.total }}）</summary>
+            {% if card["items"] %}
+            <div class="admin-execution-report-table">
+                <div class="admin-execution-report-row is-header">
+                    <span>元神</span><span>结果</span><span>奖励</span>
+                </div>
+                {% for item in card["items"] %}
+                <div class="admin-execution-report-row">
+                    <strong>{{ item.profile_name }}</strong>
+                    <span class="admin-execution-result is-{{ item.status }}">{{ item.status_label }}</span>
+                    <span>{{ item.reward }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted top-gap">暂无执行记录。</p>
+            {% endif %}
+        </details>
+    </article>
+    {% endfor %}
+</section>
+{% endblock %}

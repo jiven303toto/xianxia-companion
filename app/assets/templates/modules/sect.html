@@ -1,0 +1,1032 @@
+<style>
+.wanling-roam-config-card {
+    grid-column: 1 / -1;
+}
+.wanling-roam-config-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 28px;
+}
+.wanling-roam-config-form {
+    grid-template-columns: minmax(300px, 0.8fr) minmax(420px, 1.4fr);
+    align-items: start;
+}
+.wanling-roam-config-notices {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.wanling-beast-option-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px 18px;
+    max-height: 260px;
+    overflow: auto;
+    padding-right: 8px;
+}
+.wanling-beast-option-grid .kv-row {
+    min-height: 34px;
+}
+@media (max-width: 1024px) {
+    .wanling-roam-config-form,
+    .wanling-roam-config-summary {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% set sect_identity_name = active_profile.sect_name or '未入宗门' if active_profile else '未入宗门' %}
+{% set sect_identity_position = active_profile.sect_position or '外门' if active_profile else '外门' %}
+
+<section class="detail-grid three-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>宗门总览</p>
+            <h2>仙门身份</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>宗门</span><strong style="color: var(--accent-gold);">{{ sect_identity_name }}</strong></div>
+            <div class="kv-row"><span>尊位</span><strong>{{ sect_identity_position }}</strong></div>
+            <div class="kv-row"><span>贡献</span><strong class="contribution-action">{{ active_profile.sect_contribution_text or '0' if active_profile else '0' }}<button type="button" class="inline-button small-btn" onclick="openSectExchangeModal()" {% if not (sect_treasury_items or []) %}disabled{% endif %}>宗门兑换</button></strong></div>
+            <div class="kv-row"><span>签到状态</span><strong>{{ '今日已点卯' if sect_daily_state.checked_in_today else '今日未点卯' }}</strong></div>
+            <div class="kv-row"><span>连签</span><strong>{{ sect_daily_state.consecutive_check_in_days }} 天</strong></div>
+            <div class="kv-row"><span>传功进度</span><strong>{{ sect_daily_state.teach_progress_text }}</strong></div>
+        </div>
+        {% if sect_recent_reply_text %}
+        <div class="top-gap">
+            <p class="muted">最近摘要</p>
+            <div class="message-text scroll-panel">{{ sect_recent_reply_text }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>宗门路线</p>
+            <h2>专属玩法</h2>
+        </div>
+        {% if current_sect_feature %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>当前路线</span><strong style="color: var(--accent-gold);">{{ current_sect_feature.name }}</strong></div>
+            <div class="kv-row"><span>定位</span><strong class="multiline-value">{{ current_sect_feature.summary }}</strong></div>
+        </div>
+        <p class="muted top-gap">{{ current_sect_feature.detail }}</p>
+        {% if current_sect_feature.playbook %}
+        <ul>
+            {% for item in current_sect_feature.playbook %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="pill-row top-gap">
+            {% for item in current_sect_feature.notes or [] %}
+            <span class="pill">{{ item }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted">当前角色暂无宗门专属玩法配置。</p>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>自动链路</p>
+            <h2>调度开关</h2>
+        </div>
+        {% if sect_bound_chat_id %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>总调度</span><strong style="color: {% if sect_session and sect_session.enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ '运行中' if sect_session and sect_session.enabled else '未启动' }}</strong></div>
+            <div class="kv-row"><span>签到</span><strong>{{ '自动' if sect_session and sect_session.auto_sect_checkin_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>传功</span><strong>{{ '自动' if sect_session and sect_session.auto_sect_teach_enabled else '手动' }}</strong></div>
+            {% if current_sect_feature and current_sect_feature.name == '凌霄宫' %}
+            <div class="kv-row"><span>凌霄登阶</span><strong>{{ '自动' if sect_session and sect_session.auto_lingxiao_enabled else '手动' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '阴罗宗' %}
+            <div class="kv-row"><span>阴罗献祭</span><strong>{{ '自动' if sect_session and sect_session.auto_yinluo_sacrifice_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>阴罗血洗</span><strong>{{ '自动' if sect_session and sect_session.auto_yinluo_blood_wash_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>召唤魔影</span><strong>{{ '自动' if sect_session and sect_session.auto_yinluo_shadow_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>阴罗炼魂</span><strong>{{ '自动' if sect_session and sect_session.auto_yinluo_refine_enabled else '手动' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '黄枫谷' %}
+            <div class="kv-row"><span>黄枫谷播种</span><strong>{{ '自动' if sect_session and sect_session.auto_huangfeng_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>播种种子</span><strong>{{ sect_session.huangfeng_seed_name or '-' if sect_session else '-' }}</strong></div>
+            <div class="kv-row"><span>自动宗门兑换</span><strong>{{ '开启' if sect_session and sect_session.auto_huangfeng_exchange_enabled else '关闭' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '星宫' %}
+            <div class="kv-row"><span>侍妾问安</span><strong>{{ '自动' if sect_session and sect_session.auto_companion_greet_enabled else '手动' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '落云宗' %}
+            <div class="kv-row"><span>灵树自动</span><strong>{{ '自动' if sect_session and sect_session.auto_luoyun_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>灵树冷却</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.frozen_irrigation_ready_time) if luoyun_state and luoyun_state.invasion_active and luoyun_state.frozen_irrigation_ready_time else format_timestamp(luoyun_state.irrigation_ready_time) if luoyun_state and luoyun_state.irrigation_ready_time else '已就绪' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '元婴宗' %}
+            <div class="kv-row"><span>问道</span><strong>{{ '自动' if sect_session and sect_session.auto_yuanying_wendao_enabled else '手动' }}</strong></div>
+            <div class="kv-row">
+                <span>问道倒计时</span>
+                <strong {% if yuanying_sect_state and yuanying_sect_state.auto_wendao_enabled and yuanying_sect_state.wendao_next_time and not yuanying_sect_state.wendao_ready %}class="countdown-text" data-countdown-target="{{ yuanying_sect_state.wendao_next_time }}"{% endif %}>
+                    {% if yuanying_sect_state and yuanying_sect_state.auto_wendao_enabled %}
+                    {{ yuanying_sect_state.wendao_next_display if yuanying_sect_state.wendao_next_time and not yuanying_sect_state.wendao_ready else '可问道' }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="kv-row">
+                <span>元婴闭关</span>
+                <strong {% if yuanying_sect_state and yuanying_sect_state.auto_retreat_enabled and yuanying_sect_state.retreat_next_time %}class="countdown-text" data-countdown-target="{{ yuanying_sect_state.retreat_next_time }}"{% endif %}>
+                    {% if yuanying_sect_state and yuanying_sect_state.auto_retreat_enabled and yuanying_sect_state.retreat_next_time %}
+                    {{ yuanying_sect_state.retreat_next_display }}
+                    {% else %}
+                    {{ '自动' if sect_session and sect_session.auto_yuanying_retreat_enabled else '手动' }}
+                    {% endif %}
+                </strong>
+            </div>
+            <div class="kv-row"><span>闭关状态</span><strong>{{ yuanying_sect_state.retreat_state if yuanying_sect_state else '-' }}</strong></div>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '万灵宗' %}
+            <div class="kv-row"><span>一键放养</span><strong>{{ '自动' if wanling_state and wanling_state.roam_auto_state.active else '手动' }}</strong></div>
+            {% endif %}
+        </div>
+        <div class="action-row top-gap" style="flex-wrap: wrap; gap: 10px;">
+            <form method="post" action="/runtime/sect/checkin-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_sect_checkin_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_sect_checkin_enabled %} active{% endif %}">{{ '关闭自动点卯' if sect_session and sect_session.auto_sect_checkin_enabled else '开启自动点卯' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/teach-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_sect_teach_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_sect_teach_enabled %} active{% endif %}">{{ '关闭自动传功' if sect_session and sect_session.auto_sect_teach_enabled else '开启自动传功' }}</button>
+            </form>
+            {% if lingxiao_state and current_sect_feature and current_sect_feature.name == '凌霄宫' %}
+            <form method="post" action="/runtime/sect/lingxiao-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_lingxiao_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_lingxiao_enabled %} active{% endif %}">{{ '关闭自动登阶' if sect_session and sect_session.auto_lingxiao_enabled else '开启自动登阶' }}</button>
+            </form>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '落云宗' %}
+            <form method="post" action="/runtime/sect/luoyun-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_luoyun_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_luoyun_enabled %} active{% endif %}">{{ '关闭灵树自动' if sect_session and sect_session.auto_luoyun_enabled else '开启灵树自动' }}</button>
+            </form>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '星宫' %}
+            <form method="post" action="/runtime/sect/companion-greet-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_companion_greet_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_companion_greet_enabled %} active{% endif %}">{{ '关闭自动问安' if sect_session and sect_session.auto_companion_greet_enabled else '开启自动问安' }}</button>
+            </form>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '元婴宗' %}
+            <form method="post" action="/runtime/sect/yuanying-wendao-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_yuanying_wendao_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_yuanying_wendao_enabled %} active{% endif %}">{{ '关闭自动问道' if sect_session and sect_session.auto_yuanying_wendao_enabled else '开启自动问道' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/yuanying-retreat-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_yuanying_retreat_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_yuanying_retreat_enabled %} active{% endif %}">{{ '关闭自动元婴闭关' if sect_session and sect_session.auto_yuanying_retreat_enabled else '开启自动元婴闭关' }}</button>
+            </form>
+            {% endif %}
+            {% if current_sect_feature and current_sect_feature.name == '万灵宗' %}
+            <form method="post" action="/runtime/sect/wanling-roam-auto">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if wanling_state and wanling_state.roam_auto_state.active %} active{% endif %}" {% if not sect_command_chat_ready or not wanling_state or not wanling_state.available %}disabled{% endif %}>{{ '停止自动放养' if wanling_state and wanling_state.roam_auto_state.active else '开启自动放养' }}</button>
+            </form>
+            {% endif %}
+        </div>
+        {% if current_sect_feature and current_sect_feature.name == '黄枫谷' %}
+        <div class="top-gap" style="border-top: 1px dashed var(--border-color); padding-top: 15px;">
+            <p style="margin-bottom: 10px; color: var(--accent-gold);">黄枫谷专属调度</p>
+            
+            {% if not sect_command_chat_ready %}
+            <p class="muted" style="margin-bottom: 10px; font-size: 0.9em;">⚠️ 宗门群聊未就绪，无法操作自动化。</p>
+            {% endif %}
+
+            {% if sect_session and sect_session.auto_huangfeng_enabled %}
+            <form class="form-grid" method="post" action="/runtime/sect/huangfeng-auto">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="0">
+                <input type="hidden" name="exchange_enabled" value="{{ '1' if sect_session.auto_huangfeng_exchange_enabled else '0' }}">
+                <input type="hidden" name="seed_name" value="{{ sect_session.huangfeng_seed_name if sect_session else '' }}">
+
+                <label>
+                    播种种子
+                    <input value="{{ sect_session.huangfeng_seed_name }}" disabled>
+                </label>
+                <label>
+                    种子不足时
+                    <select disabled>
+                        <option>{% if sect_session.auto_huangfeng_exchange_enabled %}自动宗门兑换{% else %}停止自动{% endif %}</option>
+                    </select>
+                </label>
+                <div class="full-span action-row">
+                    <button type="submit" class="inline-button auto-toggle-button active" {% if not sect_command_chat_ready %}disabled{% endif %}>停止黄枫谷自动化</button>
+                </div>
+                {% if sect_session.huangfeng_next_check_source %}
+                <p class="muted full-span" style="font-size: 0.9em;">运行状态: {{ sect_session.huangfeng_next_check_source }}</p>
+                {% endif %}
+            </form>
+            <p class="muted top-gap" style="font-size: 0.9em;">旧自动化仍在运行记录中，本页仅保留停止入口；新的黄枫谷操作请从 <code>.小药园</code> 进入 Telegram mini app。</p>
+            {% else %}
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>自动化入口</span><strong>已暂停新开启</strong></div>
+                <div class="kv-row"><span>当前操作</span><strong>发送 <code>.小药园</code> 后进入 mini app</strong></div>
+            </div>
+            <p class="muted top-gap" style="font-size: 0.9em;">黄枫谷播种、采药、除草、除虫、浇水、扩建药园已迁移到 Telegram mini app；本页不再创建新的旧群命令自动化。</p>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% else %}
+        <p class="muted">当前未绑定宗门群聊，无法切换自动宗门链路。</p>
+        {% endif %}
+    </div>
+    {% if current_sect_feature and current_sect_feature.name == '万灵宗' %}
+    {% set wanling_config = wanling_state.roam_config if wanling_state and wanling_state.roam_config else none %}
+    {% set wanling_has_current_names = wanling_config and wanling_config.available_names %}
+    <div class="detail-card wanling-roam-config-card">
+        <div class="section-header compact">
+            <p>放养前置</p>
+            <h2>灵兽队列</h2>
+        </div>
+        <div class="stack-list compact-stack wanling-roam-config-summary">
+            <div class="kv-row"><span>已选灵兽</span><strong>{{ wanling_config.selected_count if wanling_config else 0 }} / {{ wanling_config.max_beasts if wanling_config else 10 }}</strong></div>
+            <div class="kv-row"><span>执行方式</span><strong>巡游、安抚、放养</strong></div>
+        </div>
+        <form class="form-grid top-gap wanling-roam-config-form" method="post" action="/runtime/sect/wanling-roam-config">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/sect">
+            <div class="wanling-roam-config-notices">
+            <p class="muted" style="color: var(--error); border-left: 3px solid var(--error); padding-left: 10px;">重要提示：这里的灵兽名必须与当前 “我的灵兽” 回包完全一致；保存时系统只保留当前列表中存在的名字，避免 bot 因名字不匹配回错。</p>
+            </div>
+            {% if wanling_config and wanling_config.options %}
+            <div class="wanling-beast-option-grid">
+                {% for option in wanling_config.options %}
+                <label class="kv-row">
+                    <span>{{ option.name }}{% if option.missing %}（未在当前列表，保存时忽略）{% endif %}</span>
+                    <strong><input type="checkbox" name="beast_names" value="{{ option.name }}" {% if option.selected %}checked{% endif %} {% if option.missing %}disabled{% endif %}></strong>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="muted full-span">当前天机阁未提供灵兽列表，请先执行“我的灵兽”。</p>
+            {% endif %}
+            <div class="full-span action-row">
+                <button type="submit" class="inline-button" {% if not sect_command_chat_ready or not wanling_has_current_names %}disabled{% endif %}>保存灵兽队列</button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+</section>
+
+{% if tianxing_state %}
+{% set tianxing_config_redirect_to = '/modules/sect' %}
+{% include 'modules/tianxing.html' %}
+{% endif %}
+
+{% if huangfeng_state and current_sect_feature and current_sect_feature.name == '黄枫谷' %}
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>黄枫谷</p>
+            <h2>药园状态</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>地块数量</span><strong>{{ huangfeng_state.size or huangfeng_state.plot_count }}</strong></div>
+            <div class="kv-row"><span>生长中</span><strong>{{ huangfeng_state.counts.growing }}</strong></div>
+            <div class="kv-row"><span>干旱</span><strong>{{ huangfeng_state.counts.dry }}</strong></div>
+            <div class="kv-row"><span>虫害</span><strong>{{ huangfeng_state.counts.pests }}</strong></div>
+            <div class="kv-row"><span>杂草</span><strong>{{ huangfeng_state.counts.weeds }}</strong></div>
+            <div class="kv-row"><span>成熟 / 空闲</span><strong>{{ huangfeng_state.counts.mature }} / {{ huangfeng_state.counts.idle }}</strong></div>
+            <div class="kv-row"><span>状态来源</span><strong>{{ '角色结构化数据' if huangfeng_state.source == 'payload' else '最近药园回包' }}</strong></div>
+        </div>
+        {% if huangfeng_state.next_check_source %}
+        <p class="muted top-gap">{{ huangfeng_state.next_check_source }}</p>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>黄枫谷</p>
+            <h2>每块药田</h2>
+        </div>
+        {% if huangfeng_state.plots %}
+        <div class="stack-list compact-stack">
+            {% for plot in huangfeng_state.plots %}
+            <div class="kv-row" style="align-items: flex-start; gap: 14px;">
+                <span>{{ plot.plot }}号地</span>
+                <strong style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <span>{{ plot.status_label }}</span>
+                    {% if plot.seed_name %}<span class="muted" style="font-size: 0.9em; font-weight: 400;">{{ plot.seed_name }}</span>{% endif %}
+                    <span class="muted" style="font-size: 0.85em; font-weight: 400;">{{ plot.suggested_action }}</span>
+                </strong>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted">当前没有可展示的药园结构化数据，可先等待角色信息同步或执行一次小药园。</p>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+{% if luoyun_state and current_sect_feature and current_sect_feature.name == '落云宗' %}
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>落云宗</p>
+            <h2>灵树状态</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>当前阶段</span><strong>{{ luoyun_state.stage or '未知' }}</strong></div>
+            <div class="kv-row"><span>当前模式</span><strong>{{ '守山中' if luoyun_state.invasion_active else '灵树循环' }}</strong></div>
+            <div class="kv-row"><span>最近灌溉</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.last_irrigation_time) if luoyun_state.last_irrigation_time else '-' }}</strong></div>
+            <div class="kv-row"><span>灌溉冷却至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.irrigation_ready_time) if luoyun_state.irrigation_ready_time else '已就绪' }}</strong></div>
+            {% if luoyun_state.invasion_active and luoyun_state.frozen_irrigation_ready_time %}
+            <div class="kv-row"><span>冻结灌溉至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.frozen_irrigation_ready_time) }}</strong></div>
+            {% endif %}
+            <div class="kv-row"><span>状态剩余</span><strong>{{ luoyun_state.remaining_text or '无' }}</strong></div>
+            <div class="kv-row"><span>当前状态</span><strong>{{ luoyun_state.current_status_text or '-' }}</strong></div>
+            <div class="kv-row"><span>待执行动作</span><strong>{{ luoyun_state.pending_count }}</strong></div>
+        </div>
+        {% if luoyun_state.next_check_source %}
+        <p class="muted top-gap">{{ luoyun_state.next_check_source }}</p>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>落云调度</p>
+            <h2>灵树自动</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>自动状态</span><strong>{{ '运行中' if luoyun_state.auto_enabled else '未启用' }}</strong></div>
+            <div class="kv-row"><span>下次判断</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.next_check_time) if luoyun_state.next_check_time else '立即检查' }}</strong></div>
+            <div class="kv-row"><span>可执行动作</span><strong>{% if luoyun_state.can_harvest %}可采摘{% elif luoyun_state.can_irrigate %}可灌溉{% elif luoyun_state.already_picked %}已采摘{% else %}等待中{% endif %}</strong></div>
+            {% if luoyun_state.invasion_active %}
+            <div class="kv-row"><span>守山循环</span><strong>每 5 分钟检查一次</strong></div>
+            <div class="kv-row"><span>守山冷却至</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(luoyun_state.defend_ready_time) if luoyun_state.defend_ready_time else '已就绪' }}</strong></div>
+            {% endif %}
+        </div>
+        <p class="muted top-gap">开启后会先发送 <code>.灵树状态</code>，再根据最新回包顺序决定灌溉或采摘；若遇到古剑门入侵会切换为 <code>.协同守山</code> 循环。关闭后重新开启会清空旧缓存并重新判断。</p>
+    </div>
+</section>
+{% endif %}
+
+{% if xinggong_state and current_sect_feature and current_sect_feature.name == '星宫' %}
+<section class="detail-grid two-column-grid">
+    <div class="detail-card" style="grid-column: 1 / -1;">
+        <div class="section-header compact">
+            <p>星宫</p>
+            <h2>观星台 · 引星盘</h2>
+        </div>
+        {% if xinggong_state.plots %}
+        <div class="xinggong-plots" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
+            {% for plot in xinggong_state.plots %}
+            {% set cooldown_remaining = plot.cooldown_remaining or 0 %}
+            {% set cooldown_total = plot.cooldown_total or 0 %}
+            {% set raw_pct = (((cooldown_total - cooldown_remaining) / cooldown_total) * 100)|int if cooldown_total else 0 %}
+            {% set pct = 0 if raw_pct < 0 else 100 if raw_pct > 100 else raw_pct %}
+            {% if plot.collectable %}
+                {% set state_fg = 'var(--accent-green)' %}
+                {% set state_bg = 'rgba(91, 213, 155, 0.13)' %}
+                {% set state_border = 'rgba(91, 213, 155, 0.45)' %}
+                {% set state_glow = 'rgba(91, 213, 155, 0.18)' %}
+                {% set state_bar = 'rgba(91, 213, 155, 0.78), rgba(91, 213, 155, 0.34)' %}
+                {% set state_shadow = 'rgba(91, 213, 155, 0.28)' %}
+            {% elif plot.is_ready %}
+                {% set state_fg = 'rgba(72, 202, 228, 0.96)' %}
+                {% set state_bg = 'rgba(72, 202, 228, 0.13)' %}
+                {% set state_border = 'rgba(72, 202, 228, 0.42)' %}
+                {% set state_glow = 'rgba(72, 202, 228, 0.16)' %}
+                {% set state_bar = 'rgba(72, 202, 228, 0.72), rgba(91, 213, 155, 0.30)' %}
+                {% set state_shadow = 'rgba(72, 202, 228, 0.28)' %}
+            {% elif plot.needs_comfort %}
+                {% set state_fg = 'rgba(245, 158, 11, 0.96)' %}
+                {% set state_bg = 'rgba(245, 158, 11, 0.14)' %}
+                {% set state_border = 'rgba(245, 158, 11, 0.42)' %}
+                {% set state_glow = 'rgba(245, 158, 11, 0.15)' %}
+                {% set state_bar = 'rgba(245, 158, 11, 0.70), rgba(219, 180, 103, 0.30)' %}
+                {% set state_shadow = 'rgba(245, 158, 11, 0.26)' %}
+            {% else %}
+                {% set state_fg = 'var(--text-muted)' %}
+                {% set state_bg = 'rgba(255, 255, 255, 0.055)' %}
+                {% set state_border = 'var(--border-subtle)' %}
+                {% set state_glow = 'rgba(219, 180, 103, 0.16)' %}
+                {% set state_bar = 'rgba(219, 180, 103, 0.38), var(--accent-gold)' %}
+                {% set state_shadow = 'rgba(219, 180, 103, 0.24)' %}
+            {% endif %}
+            <article class="xinggong-plot-card"
+                     data-plot-id="{{ plot.plot_id }}"
+                     data-remaining-seconds="{{ cooldown_remaining }}"
+                     data-total-seconds="{{ cooldown_total }}"
+                     data-is-ready="{{ '1' if plot.is_ready else '0' }}"
+                     data-is-collectable="{{ '1' if plot.collectable else '0' }}"
+                     data-needs-comfort="{{ '1' if plot.needs_comfort else '0' }}"
+                     style="position: relative; overflow: hidden; padding: 18px; border: 1px solid {{ state_border }}; border-radius: 18px; background: radial-gradient(circle at 82% 12%, {{ state_glow }}, transparent 34%), linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)); box-shadow: 0 16px 42px rgba(0, 0, 0, 0.18); transition: border-color 0.35s, background 0.35s;">
+                <div style="position: absolute; inset: auto -28px -34px auto; width: 110px; height: 110px; border: 1px solid rgba(219, 180, 103, 0.16); border-radius: 999px;"></div>
+                <div style="position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;">
+                    <div>
+                        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.04em; background: rgba(0, 0, 0, 0.12);">
+                            <span style="color: var(--accent-gold);">#{{ plot.plot_id }}</span>
+                            <span>引星盘</span>
+                        </div>
+                        <h3 style="margin: 14px 0 0; color: var(--accent-gold); font-size: clamp(1.15rem, 2vw, 1.45rem); line-height: 1.15; font-weight: 700;">
+                            {{ plot.star_name if plot.star_name else '空闲' }}
+                        </h3>
+                    </div>
+                    <div class="xinggong-status-badge" style="flex: 0 0 auto; padding: 7px 11px; border-radius: 999px; color: {{ state_fg }}; background: {{ state_bg }}; border: 1px solid {{ state_border }}; font-size: 0.84rem; font-weight: 700; white-space: nowrap; transition: color 0.35s, background 0.35s, border-color 0.35s;">
+                        {{ '待收集' if plot.collectable else '可牵引' if plot.is_ready else '需安抚' if plot.needs_comfort else '冷却中' }}
+                    </div>
+                </div>
+
+                {% if plot.status %}
+                <p style="position: relative; margin: 10px 0 0; color: var(--text-muted); font-size: 0.92rem;">{{ plot.status }}</p>
+                {% endif %}
+
+                <div style="position: relative; margin-top: 18px; display: grid; gap: 9px;">
+                    <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                        {% if plot.collectable %}
+                        <strong class="xinggong-time-text" style="color: var(--accent-green); font-size: 1.02rem;">精华已成</strong>
+                        <span class="xinggong-pct-text" style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.82rem;">DONE</span>
+                        {% elif plot.is_ready %}
+                        <strong class="xinggong-time-text" style="color: rgba(72, 202, 228, 0.96); font-size: 1.02rem;">星轨已校准</strong>
+                        <span class="xinggong-pct-text" style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.82rem;">READY</span>
+                        {% else %}
+                        {% set rh = (cooldown_remaining / 3600)|int %}
+                        {% set rm = ((cooldown_remaining % 3600) / 60)|int %}
+                        {% set rs = (cooldown_remaining % 60)|int %}
+                        <strong class="xinggong-time-text jade-countdown-value" style="color: {% if plot.needs_comfort %}rgba(245, 158, 11, 0.96){% else %}var(--accent-gold){% endif %}; font-size: 1.02rem;">剩余{% if rh > 0 %}{{ rh }}时{% endif %}{% if rm > 0 or rh > 0 %}{{ rm }}分{% endif %}{{ rs }}秒</strong>
+                        <span class="xinggong-pct-text" style="color: var(--text-muted); font-family: var(--font-mono); font-size: 0.82rem;">{{ pct }}%</span>
+                        {% endif %}
+                    </div>
+                    <div style="height: 8px; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, 0.07); border: 1px solid var(--border-subtle);">
+                        <div class="xinggong-progress-bar" style="height: 100%; width: {% if plot.collectable or plot.is_ready %}100%{% else %}{{ pct }}{% endif %}%; border-radius: inherit; background: linear-gradient(90deg, {{ state_bar }}); box-shadow: 0 0 18px {{ state_shadow }}; transition: width 0.9s, background 0.5s, box-shadow 0.5s;"></div>
+                    </div>
+                </div>
+
+                {% if plot.start_time_text %}
+                <div style="position: relative; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.82rem; font-family: var(--font-mono);">
+                    {{ plot.start_time_text }}
+                </div>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        <script>
+        (function() {
+            var plots = document.querySelectorAll('.xinggong-plot-card');
+            function fmtTime(s) {
+                if (s <= 0) return '剩余0秒';
+                var h = Math.floor(s / 3600);
+                var m = Math.floor((s % 3600) / 60);
+                var sec = s % 60;
+                var parts = [];
+                if (h > 0) parts.push(h + '时');
+                if (m > 0 || h > 0) parts.push(m + '分');
+                parts.push(sec + '秒');
+                return '剩余' + parts.join('');
+            }
+            function updateCard(card) {
+                var isCollectable = card.getAttribute('data-is-collectable') === '1';
+                if (isCollectable) return;
+                var remaining = parseInt(card.getAttribute('data-remaining-seconds') || '0', 10);
+                var total = parseInt(card.getAttribute('data-total-seconds') || '0', 10);
+                var isReady = card.getAttribute('data-is-ready') === '1';
+                if (isReady) return;
+                var needsComfort = card.getAttribute('data-needs-comfort') === '1';
+                if (remaining <= 0 && total > 0) return;
+                remaining = Math.max(remaining - 1, 0);
+                card.setAttribute('data-remaining-seconds', remaining);
+                var timeEl = card.querySelector('.xinggong-time-text');
+                var pctEl = card.querySelector('.xinggong-pct-text');
+                var barEl = card.querySelector('.xinggong-progress-bar');
+                var badgeEl = card.querySelector('.xinggong-status-badge');
+                if (timeEl) timeEl.textContent = fmtTime(remaining);
+                var pct = total > 0 ? Math.min(100, Math.max(0, Math.round(((total - remaining) / total) * 100))) : 0;
+                if (pctEl) pctEl.textContent = pct + '%';
+                if (barEl) barEl.style.width = pct + '%';
+                if (remaining <= 0) {
+                    if (needsComfort) return;
+                    card.setAttribute('data-is-ready', '1');
+                    if (badgeEl) badgeEl.textContent = '可牵引';
+                    card.style.borderColor = 'rgba(72, 202, 228, 0.42)';
+                    card.style.background = 'radial-gradient(circle at 82% 12%, rgba(72, 202, 228, 0.16), transparent 34%), linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018))';
+                    if (badgeEl) {
+                        badgeEl.style.color = 'rgba(72, 202, 228, 0.96)';
+                        badgeEl.style.background = 'rgba(72, 202, 228, 0.13)';
+                        badgeEl.style.borderColor = 'rgba(72, 202, 228, 0.42)';
+                    }
+                }
+            }
+            function tickAll() {
+                for (var i = 0; i < plots.length; i++) {
+                    updateCard(plots[i]);
+                }
+            }
+            setInterval(tickAll, 1000);
+        })();
+        </script>
+        {% endif %}
+        {% if not xinggong_state.plots %}
+        <p class="muted">暂无引星盘缓存；可从公共洞府入口同步星宫观星台状态。</p>
+        {% endif %}
+        {% set starboard_auto = xinggong_state.starboard_auto_state %}
+        <div class="top-gap xinggong-starboard-actions" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <form method="post" action="/runtime/sect/action" style="display: contents;">
+                <input type="hidden" name="sect_name" value="{{ current_sect_feature.name }}">
+                <input type="hidden" name="action_key" value="starboard">
+                <input type="hidden" name="redirect_to" value="/modules/sect">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <button type="submit" {% if not sect_command_chat_ready %}disabled{% endif %} class="small-btn">从公共洞府同步观星台</button>
+            </form>
+            {% if starboard_auto.active %}
+            <form method="post" action="/runtime/sect/xinggong-starboard-auto" style="display: contents;">
+                <input type="hidden" name="redirect_to" value="/modules/sect">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <input type="hidden" name="target_star" value="{{ starboard_auto.target_star }}">
+                <button type="submit" {% if not sect_command_chat_ready %}disabled{% endif %} class="small-btn inline-button auto-toggle-button active">停止自动星辰采集</button>
+            </form>
+            {% else %}
+            <form method="post" action="/runtime/sect/xinggong-starboard-auto" style="display: contents;">
+                <input type="hidden" name="redirect_to" value="/modules/sect">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <select name="target_star" {% if not sect_command_chat_ready %}disabled{% endif %} aria-label="目标星辰">
+                    {% for option in xinggong_state.star_options %}
+                    <option value="{{ option.value }}" {% if option.value == starboard_auto.target_star %}selected{% endif %} {% if option.disabled %}disabled{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" {% if not sect_command_chat_ready %}disabled{% endif %} class="small-btn inline-button auto-toggle-button">开启自动星辰采集</button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="stack-list compact-stack top-gap">
+            <div class="kv-row"><span>当前入口</span><strong>公共洞府入口 → 外府 → 宗门灵圃</strong></div>
+            <div class="kv-row"><span>自动流程</span><strong>提取星宫灵圃入口，再执行 MiniApp 安抚、收集、牵星</strong></div>
+            <div class="kv-row"><span>已迁移动作</span><strong>扩建、牵引、安抚、收集精华</strong></div>
+        </div>
+        <p class="muted top-gap">星宫观星台已迁到 Telegram mini app；本页通过公共洞府入口获取星宫灵圃，不再发送 .观星台 或旧的牵引、安抚、收集群命令。</p>
+        {% if xinggong_state.starboard_auto_state.active %}
+        <p class="muted top-gap">自动星辰采集运行中：目标 {{ xinggong_state.starboard_auto_state.target_star }}，下次检查 <span class="countdown-text" data-countdown-target="{{ xinggong_state.starboard_auto_state.next_run_target }}">{{ xinggong_state.starboard_auto_state.next_run_display }}</span>。</p>
+        {% elif xinggong_state.starboard_auto_state.last_error %}
+        <p class="muted top-gap">自动星辰采集：{{ xinggong_state.starboard_auto_state.last_error }}</p>
+        {% endif %}
+        {% if xinggong_state.starboard_auto_result %}
+        <p class="starboard-auto-result starboard-auto-result-{{ xinggong_state.starboard_auto_result.level }}">
+            {{ xinggong_state.starboard_auto_result.message }}
+            {% if xinggong_state.starboard_auto_result.reward_summary %}
+            <span>材料 {{ xinggong_state.starboard_auto_result.reward_summary }}</span>
+            {% elif xinggong_state.starboard_auto_result.collected %}
+            <span>材料明细未返回</span>
+            {% endif %}
+            {% if xinggong_state.starboard_auto_result.time_display %}
+            <span>时间 {{ xinggong_state.starboard_auto_result.time_display }}</span>
+            {% endif %}
+        </p>
+        {% endif %}
+        {% set starboard_history = xinggong_state.starboard_auto_history %}
+        <div class="stack-list compact-stack top-gap">
+            <div class="kv-row"><span>今日采集记录</span><strong>{{ starboard_history.entry_count }} 次</strong></div>
+            <div class="kv-row"><span>今日牵星</span><strong>{{ starboard_history.pulled_total }} 个星台</strong></div>
+            <div class="kv-row"><span>材料合计</span><strong>{{ starboard_history.reward_summary if starboard_history.reward_summary else '暂无材料明细' }}</strong></div>
+            {% if starboard_history.entries %}
+            {% for item in starboard_history.entries[:5] %}
+            <div class="kv-row">
+                <span>{{ item.time_display or '-' }}</span>
+                <strong>
+                    {{ item.action_summary }}
+                    {% if item.reward_summary %}
+                    · {{ item.reward_summary }}
+                    {% elif item.collected %}
+                    · 材料明细未返回
+                    {% endif %}
+                </strong>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="kv-row"><span>明细</span><strong>今日暂无自动采集记录</strong></div>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>星宫</p>
+            <h2>星宫助阵</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>自动状态</span><strong>{{ '自动' if xinggong_state.auto_companion_assist_enabled else '手动' }}</strong></div>
+            <div class="kv-row"><span>当前状态</span><strong class="companion-assist-status" style="font-family: var(--font-mono);">{{ xinggong_state.companion_assist_status_display or '可助阵' }}</strong></div>
+            <div class="kv-row"><span>冷却至</span><strong class="companion-assist-cooldown-until" style="font-family: var(--font-mono);">{{ xinggong_state.companion_assist_cooldown_display or '可助阵' }}</strong></div>
+            <div class="kv-row">
+                <span>CD倒计时</span>
+                <strong class="companion-assist-countdown"
+                        data-remaining-seconds="{{ xinggong_state.companion_assist_cooldown_remaining_seconds or 0 }}"
+                        style="font-family: var(--font-mono); color: {% if xinggong_state.companion_assist_cooldown_remaining_seconds %}var(--accent-gold){% else %}var(--accent-green){% endif %};">
+                    {{ xinggong_state.companion_assist_cooldown_remaining_display or '可助阵' }}
+                </strong>
+            </div>
+            <div class="kv-row"><span>待助阵窗</span><strong style="font-family: var(--font-mono);">{{ xinggong_state.companion_assist_pending_window_display or '-' }}</strong></div>
+            <div class="kv-row"><span>加持数据</span><strong>{{ '已同步' if xinggong_state.star_formation_view.available else '未提供' }}</strong></div>
+        </div>
+        <div class="action-row top-gap" style="flex-wrap: wrap; gap: 10px;">
+            <form method="post" action="/runtime/sect/companion-assist-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if sect_session and sect_session.auto_companion_assist_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if sect_session and sect_session.auto_companion_assist_enabled %} active{% endif %}">{{ '关闭自动助阵' if sect_session and sect_session.auto_companion_assist_enabled else '开启自动助阵' }}</button>
+            </form>
+        </div>
+        <p class="muted top-gap">自动助阵会监听启阵回包，在 60 秒窗口内对原消息 reply 发送 <code>.助阵</code>；冷却以最近一次助阵时间为准。</p>
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>星宫</p>
+            <h2>星力加持</h2>
+        </div>
+        {% if xinggong_state.star_formation_view and xinggong_state.star_formation_view.available %}
+        <div class="stack-list compact-stack">
+            {% if xinggong_state.star_formation_view.active_buff %}
+            <div class="kv-row"><span>当前Buff</span><strong>{{ '生效中' if xinggong_state.star_formation_view.active_buff_is_active else '已结束' }}</strong></div>
+            {% endif %}
+            {% if xinggong_state.star_formation_view.active_entries %}
+            {% for item in xinggong_state.star_formation_view.active_entries %}
+            <div class="kv-row" style="align-items: flex-start; gap: 14px;">
+                <span>{{ item.label }}</span>
+                <strong style="text-align: right; font-family: var(--font-mono);">{{ item.value }}</strong>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if xinggong_state.star_formation_view.profile_entries %}
+            <div class="kv-row"><span>星力档案</span><strong>已同步</strong></div>
+            {% for item in xinggong_state.star_formation_view.profile_entries %}
+            <div class="kv-row" style="align-items: flex-start; gap: 14px;">
+                <span>{{ item.label }}</span>
+                <strong style="text-align: right; font-family: var(--font-mono);">{{ item.value }}</strong>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if not xinggong_state.star_formation_view.active_entries and not xinggong_state.star_formation_view.profile_entries %}
+            <div class="kv-row"><span>加持明细</span><strong>接口未提供</strong></div>
+            {% endif %}
+            {% if xinggong_state.star_formation_view.active_buff_expiry_time %}
+            <div class="kv-row">
+                <span>Buff倒计时</span>
+                <strong class="star-formation-buff-countdown"
+                        data-remaining-seconds="{{ xinggong_state.star_formation_view.active_buff_remaining_seconds or 0 }}"
+                        style="font-family: var(--font-mono); color: {% if xinggong_state.star_formation_view.active_buff_remaining_seconds %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                    {{ xinggong_state.star_formation_view.active_buff_remaining_display or '已结束' }}
+                </strong>
+            </div>
+            {% endif %}
+            <div class="kv-row"><span>上次星力加持</span><strong style="font-family: var(--font-mono);">{{ xinggong_state.last_star_formation_time_display or '-' }}</strong></div>
+        </div>
+        {% else %}
+        <p class="muted">当前星宫回包未提供星力加持信息，可能是接口尚未同步或字段缺失。</p>
+        {% endif %}
+    </div>
+</section>
+<script>
+(function() {
+    function fmtCountdown(seconds, readyText) {
+        var s = Math.max(parseInt(seconds || '0', 10), 0);
+        if (s <= 0) return readyText;
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        var parts = [];
+        if (h > 0) parts.push(h + '时');
+        if (m > 0 || h > 0) parts.push(m + '分');
+        parts.push(sec + '秒');
+        return '剩余' + parts.join('');
+    }
+    function tickCountdown(selector, readyText, readyColor) {
+        var nodes = document.querySelectorAll(selector);
+        for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            var remaining = Math.max(parseInt(el.getAttribute('data-remaining-seconds') || '0', 10), 0);
+            el.textContent = fmtCountdown(remaining, readyText);
+            if (remaining <= 0) {
+                if (readyColor) el.style.color = readyColor;
+                continue;
+            }
+            remaining = Math.max(remaining - 1, 0);
+            el.setAttribute('data-remaining-seconds', remaining);
+        }
+    }
+    function tickAll() {
+        tickCountdown('.companion-assist-countdown', '可助阵', 'var(--accent-green)');
+        tickCountdown('.star-formation-buff-countdown', '已结束', 'var(--text-muted)');
+        var assistCountdown = document.querySelector('.companion-assist-countdown');
+        if (assistCountdown && parseInt(assistCountdown.getAttribute('data-remaining-seconds') || '0', 10) <= 0) {
+            var assistStatus = document.querySelector('.companion-assist-status');
+            var assistUntil = document.querySelector('.companion-assist-cooldown-until');
+            if (assistStatus && assistStatus.textContent.trim() === '冷却中') assistStatus.textContent = '可助阵';
+            if (assistUntil) assistUntil.textContent = '可助阵';
+        }
+    }
+    tickAll();
+    setInterval(tickAll, 1000);
+})();
+</script>
+{% endif %}
+
+{% if current_sect_feature and current_sect_feature.name == '星宫' %}
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>宗门动作</p>
+            <h2>星宫操作已迁移</h2>
+        </div>
+        <p class="muted">群内星宫旧命令目前不再作为操作入口。观星台状态同步和自动采集均通过公共洞府的宗门灵圃入口完成。</p>
+        <div class="stack-list compact-stack top-gap">
+            <div class="kv-row"><span>当前入口</span><strong>公共洞府 → 外府 → 宗门灵圃</strong></div>
+            <div class="kv-row"><span>隐藏旧动作</span><strong>启阵、助阵、观星、牵引星辰、安抚星辰、收集精华</strong></div>
+            <div class="kv-row"><span>影响范围</span><strong>仅页面展示，不自动关闭现有调度</strong></div>
+        </div>
+    </div>
+</section>
+{% endif %}
+{% if current_sect_feature and current_sect_feature.name == '黄枫谷' %}
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>宗门动作</p>
+            <h2>黄枫谷操作已迁移</h2>
+        </div>
+        <p class="muted">群内黄枫谷入口以 <code>.小药园</code> 为主。机器人会返回“进入灵圃”的 Telegram mini app，播种、采药、除草、除虫、浇水和扩建药园都在里面完成。</p>
+        <form class="form-grid top-gap" method="post" action="/runtime/sect/action">
+            <input type="hidden" name="sect_name" value="{{ current_sect_feature.name }}">
+            <input type="hidden" name="action_key" value="garden">
+            <input type="hidden" name="redirect_to" value="/modules/sect">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+            <div class="full-span action-row">
+                <button type="submit" class="inline-button" {% if not sect_command_chat_ready %}disabled{% endif %}>发送 .小药园</button>
+            </div>
+        </form>
+        <div class="stack-list compact-stack top-gap">
+            <div class="kv-row"><span>保留群命令</span><strong><code>.小药园</code></strong></div>
+            <div class="kv-row"><span>Mini app 操作</span><strong>播种、采药、除草、除虫、浇水、扩建药园</strong></div>
+            <div class="kv-row"><span>页面用途</span><strong>只读查看药园缓存、地块状态和旧调度状态</strong></div>
+            <div class="kv-row"><span>影响范围</span><strong>仅页面展示，不自动开启或停止现有调度</strong></div>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if yinluo_state and current_sect_feature and current_sect_feature.name == '阴罗宗' %}
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>阴罗宗</p>
+            <h2>幡灵与魂袋</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>持幡者</span><strong>{{ yinluo_state.owner_name or '-' }}</strong></div>
+            <div class="kv-row"><span>位阶</span><strong>{{ yinluo_state.rank_text or '-' }}</strong></div>
+            <div class="kv-row"><span>煞气池</span><strong>{{ yinluo_state.sha_pool_current }}/{{ yinluo_state.sha_pool_capacity }}</strong></div>
+            <div class="kv-row"><span>日常体力</span><strong>{{ yinluo_state.daily_battle_stamina }}</strong></div>
+            <div class="kv-row"><span>精华已成</span><strong>{{ yinluo_state.refining_slot_ready_count }} / {{ yinluo_state.refining_slot_total }}</strong></div>
+            <div class="kv-row"><span>空闲槽位</span><strong>{{ yinluo_state.refining_slot_idle_count }}</strong></div>
+        </div>
+        {% if yinluo_state.soul_pouch_entries %}
+        <div class="top-gap pill-row">
+            {% for entry in yinluo_state.soul_pouch_entries[:12] %}
+            <span class="pill">{{ entry.name }} x{{ entry.quantity }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>阴罗调度</p>
+            <h2>专项开关</h2>
+        </div>
+        <div class="action-row" style="flex-wrap: wrap; gap: 10px;">
+            <form method="post" action="/runtime/sect/yinluo-all-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if yinluo_state.auto_all_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if yinluo_state.auto_all_enabled %} active{% endif %}" {% if not sect_command_chat_ready %}disabled{% endif %}>{{ '关闭阴罗一键调度' if yinluo_state.auto_all_enabled else '开启阴罗一键调度' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/yinluo-sacrifice-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if yinluo_state.auto_sacrifice_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if yinluo_state.auto_sacrifice_enabled %} active{% endif %}">{{ '关闭自动献祭' if yinluo_state.auto_sacrifice_enabled else '开启自动献祭' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/yinluo-blood-wash-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if yinluo_state.auto_blood_wash_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if yinluo_state.auto_blood_wash_enabled %} active{% endif %}">{{ '关闭自动血洗' if yinluo_state.auto_blood_wash_enabled else '开启自动血洗' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/yinluo-shadow-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if yinluo_state.auto_shadow_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if yinluo_state.auto_shadow_enabled %} active{% endif %}">{{ '关闭自动魔影' if yinluo_state.auto_shadow_enabled else '开启自动魔影' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/yinluo-refine-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if yinluo_state.auto_refine_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if yinluo_state.auto_refine_enabled %} active{% endif %}">{{ '关闭自动炼魂' if yinluo_state.auto_refine_enabled else '开启自动炼魂' }}</button>
+            </form>
+            <div class="kv-row" style="width: 100%;"><span>魔影检查</span><strong>{{ format_timestamp(sect_session.yinluo_shadow_next_check_time) if sect_session and sect_session.auto_yinluo_shadow_enabled else '-' }}</strong></div>
+            <div class="kv-row" style="width: 100%;"><span>炼魂检查</span><strong>{{ format_timestamp(sect_session.yinluo_refine_next_check_time) if sect_session and sect_session.auto_yinluo_refine_enabled else '-' }}</strong></div>
+            <form method="post" action="/runtime/sect/yinluo-batch">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/sect">
+                <input type="hidden" name="batch_mode" value="collect">
+                <button type="submit" {% if not sect_command_chat_ready %}disabled{% endif %}>一键收取精华</button>
+            </form>
+            <form method="post" action="/runtime/sect/yinluo-batch">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/sect">
+                <input type="hidden" name="batch_mode" value="soothe">
+                <button type="submit" {% if not sect_command_chat_ready %}disabled{% endif %}>一键安抚幡灵</button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if current_sect_feature and current_sect_feature.actions and current_sect_feature.name not in ['星宫', '黄枫谷'] %}
+<section class="detail-grid">
+    {% for action in current_sect_feature.actions %}
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>宗门动作</p>
+            <h2>{{ action.title }}</h2>
+        </div>
+        <p class="muted">{{ action.description }}</p>
+        {% if action.key == 'companion' and xinggong_state %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>侍妾</span><strong>{{ xinggong_state.companion_name or '无' }}</strong></div>
+            <div class="kv-row"><span>情缘值</span><strong style="color: var(--accent-gold);">{{ xinggong_state.companion_affection }}</strong></div>
+        </div>
+        {% elif action.key == 'greet' and xinggong_state %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>今日问安</span><strong style="color: {% if xinggong_state.companion_greeted_today %}var(--accent-green){% else %}var(--text-muted){% endif %};">{{ '已问安' if xinggong_state.companion_greeted_today else '未问安' }}</strong></div>
+            <div class="kv-row"><span>上次问安</span><strong>{{ xinggong_state.last_companion_greet_date or '-' }}</strong></div>
+        </div>
+        {% elif action.key == 'farm' and wanling_state %}
+        {% if wanling_state.available %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>放养中</span><strong>{{ wanling_state.active_count }} / {{ wanling_state.beast_count }}</strong></div>
+            <div class="kv-row"><span>下轮归来</span><strong {% if wanling_state.next_finish_target %}class="countdown-text" data-countdown-target="{{ wanling_state.next_finish_target }}"{% endif %}>{{ wanling_state.next_finish_display }}</strong></div>
+            <div class="kv-row"><span>归来时间</span><strong style="font-family: var(--font-mono);">{{ wanling_state.next_finish_time_display if wanling_state.next_finish_target else '可放养' }}</strong></div>
+            {% if wanling_state.roam_auto_state.active %}
+            <div class="kv-row"><span>自动下次</span><strong {% if wanling_state.roam_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ wanling_state.roam_auto_state.next_run_target }}"{% endif %}>{{ wanling_state.roam_auto_state.next_run_display }}</strong></div>
+            {% endif %}
+        </div>
+        {% if wanling_state.roam_command_sequence %}
+        <div class="stack-list compact-stack top-gap">
+            {% for command_text in wanling_state.roam_command_sequence %}
+            <div class="kv-row"><span>第 {{ loop.index }} 步</span><strong style="font-family: var(--font-mono);">{{ command_text }}</strong></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if wanling_state.roam_auto_state.last_error %}
+        <p class="muted top-gap">自动放养：{{ wanling_state.roam_auto_state.last_error }}</p>
+        {% endif %}
+        {% else %}
+        <p class="muted top-gap">当前天机阁未提供灵兽放养数据。</p>
+        {% endif %}
+        {% endif %}
+        <form class="form-grid top-gap" method="post" action="/runtime/sect/action">
+            <input type="hidden" name="sect_name" value="{{ current_sect_feature.name }}">
+            <input type="hidden" name="action_key" value="{{ action.key }}">
+            <input type="hidden" name="redirect_to" value="/modules/sect">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+            {% for field in action.fields or [] %}
+                {% if current_sect_feature.name == '万灵宗' and field.name == 'beast' %}
+                {% set beast_options = wanling_state.roam_config.available_names if wanling_state and wanling_state.roam_config and wanling_state.roam_config.available_names else [] %}
+                <label>
+                    {{ field.label }}
+                    <select name="{{ field.name }}" {% if field.required %}required{% endif %} {% if not beast_options %}disabled{% endif %}>
+                        {% if beast_options %}
+                        {% for beast_name in beast_options %}
+                        <option value="{{ beast_name }}">{{ beast_name }}</option>
+                        {% endfor %}
+                        {% else %}
+                        <option value="">请先执行“我的灵兽”</option>
+                        {% endif %}
+                    </select>
+                </label>
+                {% elif field.type == 'select' %}
+                <label class="{{ 'full-span' if (field.options or [])|length > 4 else '' }}">
+                    {{ field.label }}
+                    <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                        {% for option in field.options or [] %}
+                        <option value="{{ option.value }}" {% if option.disabled %}disabled{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {% elif action.key == 'pull' and field.name == 'star' and xinggong_state and xinggong_state.star_options %}
+                <label>
+                    {{ field.label }}
+                    <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                        {% for option in xinggong_state.star_options %}
+                        <option value="{{ option.value }}" {% if option.disabled %}disabled{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {% elif action.key == 'gift' and field.name == 'item' and xinggong_state and xinggong_state.companion_gift_items %}
+                <label>
+                    {{ field.label }}
+                    <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                        {% for option in xinggong_state.companion_gift_items %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {% else %}
+                <label>
+                    {{ field.label }}
+                    <input name="{{ field.name }}" placeholder="{{ field.placeholder or '' }}" {% if field.required %}required{% endif %}>
+                </label>
+                {% endif %}
+            {% endfor %}
+            <div class="full-span action-row">
+                <button type="submit" {% if not sect_command_chat_ready or (current_sect_feature.name == '万灵宗' and action.key in ['battle', 'rest', 'feed'] and not (wanling_state and wanling_state.roam_config and wanling_state.roam_config.available_names)) %}disabled{% endif %}>{{ action.submit_label or '加入队列' }}</button>
+            </div>
+        </form>
+        {% if action.command %}
+        <p class="muted top-gap">参考指令：<code>{{ action.command }}</code></p>
+        {% elif action.template %}
+        <p class="muted top-gap">指令模板：<code>{{ action.template }}</code></p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
+
+{% if lingxiao_state and current_sect_feature and current_sect_feature.name == '凌霄宫' %}
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>凌霄宫</p>
+            <h2>登阶状态</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>当前层数</span><strong>{{ lingxiao_state.step_display }}</strong></div>
+            <div class="kv-row"><span>循环轮次</span><strong>{{ lingxiao_state.cycles }}</strong></div>
+            <div class="kv-row"><span>肉身体魄</span><strong>{{ lingxiao_state.body_temper_display }}</strong></div>
+            <div class="kv-row"><span>心境</span><strong>{{ lingxiao_state.heart_state or '未记录' }}</strong></div>
+            <div class="kv-row"><span>下次登阶</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(lingxiao_state.climb_ready_time) if lingxiao_state.climb_ready_time else '已就绪' }}</strong></div>
+            <div class="kv-row"><span>罡风锻体</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(lingxiao_state.gangfeng_ready_time) if lingxiao_state.gangfeng_ready_time else '已就绪' }}</strong></div>
+            <div class="kv-row"><span>借天门</span><strong style="font-family: var(--font-mono);">{{ format_timestamp(lingxiao_state.borrow_ready_time) if lingxiao_state.borrow_ready_time else '已就绪' }}</strong></div>
+            <div class="kv-row"><span>今日问心</span><strong>{{ '已完成' if lingxiao_state.questioned_today else '未完成' }}</strong></div>
+        </div>
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>凌霄调度</p>
+            <h2>专项开关</h2>
+        </div>
+        <div class="action-row" style="flex-wrap: wrap; gap: 10px;">
+            <form method="post" action="/runtime/sect/lingxiao-gangfeng-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if lingxiao_state.auto_gangfeng_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if lingxiao_state.auto_gangfeng_enabled %} active{% endif %}">{{ '关闭自动罡风' if lingxiao_state.auto_gangfeng_enabled else '开启自动罡风' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/lingxiao-borrow-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if lingxiao_state.auto_borrow_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if lingxiao_state.auto_borrow_enabled %} active{% endif %}">{{ '关闭自动借门' if lingxiao_state.auto_borrow_enabled else '开启自动借门' }}</button>
+            </form>
+            <form method="post" action="/runtime/sect/lingxiao-question-toggle">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id }}">
+                <input type="hidden" name="enabled" value="{{ '0' if lingxiao_state.auto_question_enabled else '1' }}">
+                <button type="submit" class="inline-button auto-toggle-button{% if lingxiao_state.auto_question_enabled %} active{% endif %}">{{ '关闭自动问心' if lingxiao_state.auto_question_enabled else '开启自动问心' }}</button>
+            </form>
+        </div>
+    </div>
+</section>
+{% endif %}

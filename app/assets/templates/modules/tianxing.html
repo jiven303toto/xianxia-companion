@@ -1,0 +1,600 @@
+{% set tx = tianxing_state or {} %}
+{% set state = tx.state or {} %}
+{% set config = tx.config or {} %}
+{% set timeline = tx.timeline or {} %}
+{% set active_step = timeline.active_step or {} %}
+{% set rewards = tianxing_daily_rewards or {} %}
+{% set reward_summary = rewards.summary or {} %}
+{% set reward_entries = rewards.entries or [] %}
+{% set wild_deep_log_export = wild_deep_log_export_result or {} %}
+{% set craft_loop_view = tx.craft_loop_view or {} %}
+{% set tianxing_stars = ['太阴', '贪狼'] %}
+{% set tianxing_routes = ['探索', '闭关', '炼制', '斗法'] %}
+{% set timeline_phase_labels = {
+    'planning': '规划中',
+    'waiting_send': '等待发送',
+    'sent_waiting_ack': '已发送，等待确认',
+    'state_confirmed': '状态已确认',
+    'downstream_released': '下游已放行',
+    'ack_timeout': '确认超时',
+    'calibrating': '校准中',
+    'blocked_replan': '阻断重排'
+} %}
+{% set timeline_action_labels = {
+    'panel': '查盘',
+    'observe': '观命',
+    'clear_calamity': '消劫',
+    'set_star': '定命',
+    'predict': '推命',
+    'change_fate': '改命',
+    'craft': '炼制',
+    'retreat': '闭关'
+} %}
+{% set craft_loop_phase_labels = {
+    'idle': '等待下一轮',
+    'await_predict': '等待推命回包',
+    'await_predict_panel': '查盘校准',
+    'await_craft': '等待炼制',
+    'done': '已完成',
+    'stopped': '已停止',
+    'error': '异常停止'
+} %}
+{% set tianxing_result_labels = {
+    'prediction_hit': '推命命中',
+    'prediction_miss': '推命落空',
+    'change_triggered': '改命回天',
+    'success': '成功',
+    'settlement': '结算',
+    'panel': '查盘',
+    'observe': '观命',
+    'cooldown': '冷却中',
+    'noop': '无需处理'
+} %}
+
+<style>
+.tianxing-config-form .tianxing-check-row {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 9px 10px;
+    border: 1px solid rgba(212, 175, 55, 0.18);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+}
+.tianxing-config-form .tianxing-check-row:hover {
+    border-color: rgba(212, 175, 55, 0.45);
+    background: rgba(212, 175, 55, 0.05);
+}
+.tianxing-config-form .tianxing-check-row input[type="checkbox"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+.tianxing-check-box {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    border: 1px solid rgba(212, 175, 55, 0.45);
+    border-radius: 3px;
+    background: var(--bg-base);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.tianxing-config-form input[type="checkbox"]:checked + .tianxing-check-box {
+    border-color: var(--accent-gold);
+    background: var(--accent-gold);
+    box-shadow: 0 0 12px rgba(212, 175, 55, 0.28);
+}
+.tianxing-config-form input[type="checkbox"]:checked + .tianxing-check-box::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--bg-base);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.tianxing-config-form input[type="checkbox"]:focus-visible + .tianxing-check-box {
+    outline: 2px solid rgba(212, 175, 55, 0.6);
+    outline-offset: 2px;
+}
+.tianxing-route-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.tianxing-route-title {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+.tianxing-command-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.tianxing-command-grid form {
+    margin: 0;
+}
+.tianxing-command-grid button {
+    width: 100%;
+}
+.tianxing-config-form input[type="checkbox"]:checked + .tianxing-check-box + span {
+    color: var(--accent-gold);
+}
+.kv-row strong.tianxing-status-on {
+    color: #56f28f;
+    text-shadow: 0 0 10px rgba(86, 242, 143, 0.28);
+}
+.kv-row strong.tianxing-status-off {
+    color: #ff6f61;
+    text-shadow: 0 0 10px rgba(255, 111, 97, 0.24);
+}
+.kv-row strong.tianxing-status-route,
+.kv-row strong .tianxing-route-chip {
+    color: #ffd24a;
+    text-shadow: 0 0 10px rgba(255, 210, 74, 0.3);
+}
+.kv-row strong .tianxing-route-sep {
+    color: var(--text-muted);
+    margin: 0 4px;
+}
+.kv-row strong.tianxing-summary-value {
+    font-weight: 700;
+}
+:root[data-theme="jade"] .kv-row strong.tianxing-status-on {
+    color: #087246;
+    font-weight: 800;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+:root[data-theme="jade"] .kv-row strong.tianxing-status-off {
+    color: #c2413a;
+    font-weight: 800;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.68);
+}
+:root[data-theme="jade"] .kv-row strong.tianxing-status-route,
+:root[data-theme="jade"] .kv-row strong .tianxing-route-chip {
+    color: #9a6400;
+    font-weight: 800;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+.tianxing-route-with-countdown {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.tianxing-countdown-badge {
+    color: #9fe6c5;
+    font-size: 12px;
+    font-weight: 700;
+}
+.tianxing-countdown-muted {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.tianxing-flow-note {
+    grid-column: 1 / -1;
+    margin: 0 0 4px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 210, 74, 0.38);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 210, 74, 0.08);
+    color: #ffd24a;
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+.tianxing-reward-tools {
+    position: relative;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+.tianxing-reward-tools form {
+    margin: 0;
+}
+.tianxing-reward-date-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.tianxing-reward-date-picker {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.tianxing-reward-date-form [data-tianxing-reward-date-input] {
+    width: 160px;
+    min-width: 0;
+}
+.tianxing-reward-calendar {
+    position: absolute;
+    z-index: 80;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 288px;
+    padding: 12px;
+    border: 1px solid rgba(122, 231, 180, 0.36);
+    border-radius: var(--radius-sm);
+    background: rgba(9, 24, 29, 0.98);
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.36);
+    pointer-events: auto;
+}
+.tianxing-reward-calendar[hidden] {
+    display: none;
+}
+.tianxing-calendar-header,
+.tianxing-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+.tianxing-calendar-header {
+    align-items: center;
+    margin-bottom: 8px;
+}
+.tianxing-calendar-title {
+    grid-column: 2 / 7;
+    text-align: center;
+    font-weight: 800;
+    color: var(--text-main);
+}
+.tianxing-calendar-nav,
+.tianxing-calendar-day {
+    min-width: 0;
+    padding: 0;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1;
+}
+.tianxing-calendar-nav {
+    height: 28px;
+}
+.tianxing-calendar-weekday,
+.tianxing-calendar-day {
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.tianxing-calendar-weekday {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+.tianxing-calendar-day {
+    position: relative;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-main);
+    cursor: pointer;
+}
+.tianxing-calendar-day::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 3px;
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: #25d081;
+    transform: translateX(-50%);
+    opacity: 0;
+}
+.tianxing-calendar-day.has-data::after {
+    opacity: 1;
+}
+.tianxing-calendar-day.is-outside {
+    color: var(--text-muted);
+}
+.tianxing-calendar-day.is-selected {
+    border-color: rgba(122, 231, 180, 0.7);
+    background: rgba(37, 208, 129, 0.18);
+    color: var(--text-main);
+    font-weight: 800;
+}
+[data-tianxing-reward-card] {
+    overflow: visible;
+}
+:root[data-theme="jade"] [data-tianxing-reward-card] > .tianxing-reward-tools,
+[data-tianxing-reward-card] > .tianxing-reward-tools {
+    position: relative;
+    z-index: 50;
+}
+:root[data-theme="jade"] .tianxing-flow-note {
+    border-color: rgba(185, 130, 36, 0.46);
+    background: linear-gradient(180deg, rgba(255, 250, 231, 0.96), rgba(255, 244, 210, 0.76));
+    color: #8a5a00;
+    font-weight: 700;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+:root[data-theme="jade"] .tianxing-reward-calendar {
+    border-color: rgba(61, 183, 122, 0.32);
+    background: #fbfff8;
+    box-shadow: 0 18px 38px rgba(57, 117, 91, 0.24);
+}
+:root[data-theme="jade"] .tianxing-calendar-day::after {
+    background: #22b573;
+}
+:root[data-theme="jade"] .tianxing-calendar-day.is-selected {
+    border-color: rgba(37, 151, 104, 0.62);
+    background: #178d62;
+    color: #fff;
+}
+:root[data-theme="jade"] .tianxing-calendar-day.is-selected::after {
+    background: #fff;
+}
+@media (max-width: 720px) {
+    .tianxing-route-group {
+        grid-template-columns: 1fr;
+    }
+    .tianxing-command-grid {
+        grid-template-columns: 1fr;
+    }
+    .tianxing-reward-calendar {
+        width: min(288px, calc(100vw - 48px));
+    }
+}
+</style>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>命盘快照</p>
+            <h2>当前天星状态</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>当前命星</span><strong>{{ state.fixed_star or '-' }}</strong></div>
+            <div class="kv-row"><span>今日可选</span><strong>{{ state.available_stars | join('、') if state.available_stars else '-' }}</strong></div>
+            <div class="kv-row"><span>当前推命</span><strong>{% if state.current_prediction %}<span class="tianxing-route-with-countdown"><span>{{ state.current_prediction }}</span>{% if state.current_prediction_until_source == 'panel' and (state.current_prediction_until or 0) > now_ts %}<span class="countdown-text tianxing-countdown-badge" data-countdown-target="{{ state.current_prediction_until }}">校准中</span>{% elif state.current_prediction_until_source == 'panel' %}<span class="tianxing-countdown-muted">已到期</span>{% else %}<span class="tianxing-countdown-muted">待天机盘校准</span>{% endif %}</span>{% else %}-{% endif %}</strong></div>
+            <div class="kv-row"><span>当前改命</span><strong>{% if state.current_change %}<span class="tianxing-route-with-countdown"><span>{{ state.current_change }}</span>{% if state.current_change_until_source == 'panel' and (state.current_change_until or 0) > now_ts %}<span class="countdown-text tianxing-countdown-badge" data-countdown-target="{{ state.current_change_until }}">校准中</span>{% elif state.current_change_until_source == 'panel' %}<span class="tianxing-countdown-muted">已到期</span>{% else %}<span class="tianxing-countdown-muted">待天机盘校准</span>{% endif %}</span>{% else %}-{% endif %}</strong></div>
+            <div class="kv-row"><span>天机值</span><strong>{{ state.tianji_value or 0 }}</strong></div>
+            <div class="kv-row"><span>逆命劫</span><strong>{{ state.calamity_count or 0 }}</strong></div>
+        </div>
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>命数统计</p>
+            <h2>最近结算</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>推命命中</span><strong>{{ state.hit_count or 0 }}</strong></div>
+            <div class="kv-row"><span>推命落空</span><strong>{{ state.miss_count or 0 }}</strong></div>
+            <div class="kv-row"><span>改命回天</span><strong>{{ state.change_count or 0 }}</strong></div>
+            <div class="kv-row"><span>最近路线</span><strong>{{ state.last_route or '-' }}</strong></div>
+            <div class="kv-row"><span>最近动作</span><strong>{{ state.last_action or '-' }}</strong></div>
+            <div class="kv-row"><span>最近结果</span><strong>{{ tianxing_result_labels.get(state.last_result, state.last_result or '-') }}</strong></div>
+        </div>
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>时间线</p>
+            <h2>当前推进阶段</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>阶段</span><strong>{{ timeline_phase_labels.get(timeline.phase or 'planning', timeline.phase or '规划中') }}</strong></div>
+            <div class="kv-row"><span>路线</span><strong>{{ timeline.route or '-' }}</strong></div>
+            <div class="kv-row"><span>当前步骤</span><strong>{{ timeline_action_labels.get(active_step.action, active_step.action) if active_step and active_step.action else '-' }}</strong></div>
+            <div class="kv-row"><span>已放行路线</span><strong>{{ timeline.released_routes.keys() | list | join('、') if timeline.released_routes else '-' }}</strong></div>
+            <div class="kv-row"><span>最近错误</span><strong>{{ timeline.last_error or '-' }}</strong></div>
+        </div>
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>安全开关</p>
+            <h2>profile 级配置</h2>
+        </div>
+        {% if active_profile %}
+        <form class="form-grid tianxing-config-form" method="post" action="/modules/tianxing/config">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <input type="hidden" name="scope" value="safe">
+            <input type="hidden" name="redirect_to" value="{{ tianxing_config_redirect_to or '/modules/sect' }}">
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_panel_enabled" value="1" {% if config.auto_panel_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动查盘</span></label>
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_observe_enabled" value="1" {% if config.auto_observe_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动观命</span></label>
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_clear_calamity_enabled" value="1" {% if config.auto_clear_calamity_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动消劫</span></label>
+            <label class="tianxing-check-row"><input type="checkbox" name="timeline_enabled" value="1" {% if config.timeline_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>时间线调度</span></label>
+            <div class="full-span">
+                <button class="button" type="submit" style="width: 100%;">保存安全设置</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="muted">未选择 profile，无法调整天星宗配置。</p>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>立即执行</p>
+            <h2>安全命令</h2>
+        </div>
+        {% if active_profile %}
+        {% set tianxing_manual_actions = [
+            ('panel', '立即查盘'),
+            ('observe', '立即观命'),
+            ('clear_calamity', '立即消劫')
+        ] %}
+        <div class="tianxing-command-grid">
+            {% for action, label in tianxing_manual_actions %}
+            <form method="post" action="/modules/tianxing/command">
+                <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+                <input type="hidden" name="action" value="{{ action }}">
+                <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'luoxueyao_bot' }}">
+                <input type="hidden" name="redirect_to" value="{{ tianxing_config_redirect_to or '/modules/sect' }}">
+                <button class="button" type="submit" {% if not sect_command_chat_ready %}disabled{% endif %}>{{ label }}</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% if not sect_command_chat_ready %}
+        <p class="muted top-gap">当前未绑定有效游戏群，无法立即发送天星宗命令。</p>
+        {% endif %}
+        <div class="tianxing-route-title top-gap">时间线</div>
+        <form method="post" action="/modules/tianxing/timeline">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <input type="hidden" name="enabled" value="{{ '0' if config.timeline_enabled else '1' }}">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="{{ tianxing_config_redirect_to or '/modules/sect' }}">
+            <button class="inline-button auto-toggle-button{% if config.timeline_enabled %} active{% endif %}" type="submit" {% if not config.timeline_enabled and not sect_command_chat_ready %}disabled{% endif %}>{{ '关闭探索调度' if config.timeline_enabled else '启动探索调度' }}</button>
+        </form>
+        <div class="tianxing-route-title top-gap">推命炼制循环</div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>状态</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if state.craft_loop_enabled else 'tianxing-status-off' }}">{{ craft_loop_phase_labels.get(state.craft_loop_phase or 'idle', state.craft_loop_phase or '等待下一轮') }}</strong></div>
+            <div class="kv-row"><span>进度</span><strong>{{ state.craft_loop_completed or 0 }}/{{ state.craft_loop_target_count or 30 }}，剩余 {{ state.craft_loop_remaining or 0 }}</strong></div>
+            <div class="kv-row"><span>开始时间</span><strong>{{ craft_loop_view.started_text or '-' }}</strong></div>
+            <div class="kv-row"><span>完成时间</span><strong>{{ craft_loop_view.finished_text or '-' }}</strong></div>
+            <div class="kv-row"><span>持续时间</span><strong>{{ craft_loop_view.duration_text or '-' }}</strong></div>
+            <div class="kv-row"><span>当前动作</span><strong>{{ craft_loop_view.action_text or '-' }}</strong></div>
+            {% if craft_loop_view.detail_text %}
+            <div class="kv-row"><span>等待说明</span><strong>{{ craft_loop_view.detail_text }}</strong></div>
+            {% endif %}
+            <div class="kv-row"><span>最近错误</span><strong>{{ state.craft_loop_last_error or '-' }}</strong></div>
+        </div>
+        <form class="form-grid tianxing-config-form top-gap" method="post" action="/modules/tianxing/craft-loop">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <input type="hidden" name="enabled" value="{{ '0' if state.craft_loop_enabled else '1' }}">
+            <input type="hidden" name="chat_id" value="{{ sect_bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ sect_bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ sect_bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ sect_bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="{{ tianxing_config_redirect_to or '/modules/sect' }}">
+            <label>
+                炼制目标
+                <input name="item" value="{{ state.craft_loop_item or '玄铁剑' }}">
+            </label>
+            <label>
+                循环次数
+                <input name="target_count" type="number" min="1" max="99" value="{{ state.craft_loop_target_count or 30 }}">
+            </label>
+            <div class="full-span">
+                <button class="inline-button auto-toggle-button{% if state.craft_loop_enabled %} active{% endif %}" type="submit" style="width: 100%;" {% if not state.craft_loop_enabled and not sect_command_chat_ready %}disabled{% endif %}>{{ '关闭循环' if state.craft_loop_enabled else '启动循环' }}</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="muted">未选择 profile，无法立即发送天星宗命令。</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>自动化调度</p>
+            <h2>探索风险动作</h2>
+        </div>
+        {% if active_profile %}
+        <form class="form-grid tianxing-config-form" method="post" action="/modules/tianxing/config">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <input type="hidden" name="scope" value="risk">
+            <input type="hidden" name="redirect_to" value="{{ tianxing_config_redirect_to or '/modules/sect' }}">
+            <input type="hidden" name="route_priority" value="探索">
+            <input type="hidden" name="change_route_priority" value="探索">
+            <p class="tianxing-flow-note">当前探索链路：观命 -> 定命 -> 推命探索 -> 天机盘 -> 改命探索 -> 天机盘；炼制请使用上方“推命炼制循环”。</p>
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_set_star_enabled" value="1" {% if config.auto_set_star_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动定命</span></label>
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_predict_enabled" value="1" {% if config.auto_predict_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动推命</span></label>
+            <label class="tianxing-check-row"><input type="checkbox" name="auto_change_fate_enabled" value="1" {% if config.auto_change_fate_enabled %}checked{% endif %}><span class="tianxing-check-box"></span><span>自动改命</span></label>
+            <label>
+                定命策略
+                {% set selected_star = config.set_star_name if config.set_star_name in tianxing_stars else '' %}
+                <select name="set_star_name">
+                    <option value="" {% if not selected_star %}selected{% endif %}>日常：太阴优先，其次贪狼</option>
+                    {% for star in tianxing_stars %}
+                    <option value="{{ star }}" {% if selected_star == star %}selected{% endif %}>{{ star }}优先</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="full-span">
+                <button class="button" type="submit" style="width: 100%; border-color: var(--accent-gold); color: var(--accent-gold);">保存风险设置</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="muted">未选择 profile，无法调整风险动作。</p>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>当前开关</p>
+            <h2>配置摘要</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>观测/查盘</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_panel_enabled and config.auto_observe_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_panel_enabled and config.auto_observe_enabled else '关闭' }}</strong></div>
+            <div class="kv-row"><span>自动定命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_set_star_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_set_star_enabled else '关闭' }}</strong></div>
+            <div class="kv-row"><span>定命策略</span><strong class="tianxing-summary-value tianxing-status-route">{{ (config.set_star_name ~ '优先') if config.set_star_name else '日常：太阴 > 贪狼' }}</strong></div>
+            <div class="kv-row"><span>自动推命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_predict_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_predict_enabled else '关闭' }}</strong></div>
+            <div class="kv-row"><span>自动改命</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.auto_change_fate_enabled else 'tianxing-status-off' }}">{{ '开启' if config.auto_change_fate_enabled else '关闭' }}</strong></div>
+            <div class="kv-row"><span>当前路线</span><strong><span class="tianxing-route-chip">探索</span></strong></div>
+            <div class="kv-row"><span>时间线</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if config.timeline_enabled else 'tianxing-status-off' }}">{{ '开启' if config.timeline_enabled else '关闭' }}</strong></div>
+            <div class="kv-row"><span>炼制循环</span><strong class="tianxing-summary-value {{ 'tianxing-status-on' if state.craft_loop_enabled else 'tianxing-status-off' }}">{{ '开启' if state.craft_loop_enabled else '关闭' }}</strong></div>
+        </div>
+    </div>
+</section>
+
+<section class="detail-grid" data-tianxing-reward-section>
+    <div class="detail-card" data-tianxing-reward-card>
+        <div class="section-header compact">
+            <p>收益</p>
+            <h2>{{ rewards.title or '今日探索收益' }}</h2>
+        </div>
+        <div class="tianxing-reward-tools">
+            <form class="tianxing-reward-date-form" method="get" action="/modules/sect" data-tianxing-reward-date-form data-loading-message="正在刷新探索收益">
+                <div class="tianxing-reward-date-picker">
+                    <input type="text" name="explore_day" value="{{ rewards.day_key or rewards.today_key or '' }}" inputmode="numeric" autocomplete="off" placeholder="YYYY-MM-DD" data-tianxing-reward-date-input>
+                    <button class="inline-button tianxing-reward-calendar-toggle" type="button" data-tianxing-reward-calendar-toggle aria-expanded="false">日历</button>
+                    <div class="tianxing-reward-calendar" data-tianxing-reward-calendar hidden></div>
+                </div>
+                <button class="inline-button" type="submit">查询日期</button>
+                <a class="inline-button" href="/modules/sect" data-tianxing-reward-today>今天</a>
+            </form>
+            <form method="post" action="/modules/sect/wild-deep-log/export">
+                <input type="hidden" name="day" value="{{ rewards.day_key or rewards.today_key or '' }}">
+                <button class="inline-button auto-toggle-button" type="submit" {% if not active_profile %}disabled{% endif %}>导出深入日志</button>
+            </form>
+        </div>
+        {% if wild_deep_log_export %}
+        <p class="muted top-gap">深入日志已导出：{{ wild_deep_log_export.path }}，{{ wild_deep_log_export.rows }} 条。</p>
+        {% endif %}
+        <script type="application/json" data-tianxing-reward-marked-days>{{ (rewards.marked_day_keys or []) | tojson }}</script>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>推命命中</span><strong>{{ reward_summary.hit_count or 0 }}</strong></div>
+            <div class="kv-row"><span>推命落空</span><strong>{{ reward_summary.miss_count or 0 }}</strong></div>
+            <div class="kv-row"><span>改命回天</span><strong>{{ reward_summary.change_count or 0 }}</strong></div>
+            <div class="kv-row"><span>天机值</span><strong>+{{ reward_summary.tianji_gain or 0 }}</strong></div>
+            <div class="kv-row"><span>宗门贡献</span><strong>+{{ reward_summary.contrib_gain or 0 }}</strong></div>
+            <div class="kv-row"><span>修为</span><strong>+{{ reward_summary.cultivation_gain or 0 }}</strong></div>
+            <div class="kv-row"><span>物品</span><strong class="multiline-value">{{ reward_summary.items_text or '-' }}</strong></div>
+        </div>
+        <p class="muted top-gap">{{ rewards.summary_label or '今日合计' }}：天机值 +{{ reward_summary.tianji_gain or 0 }}，宗门贡献 +{{ reward_summary.contrib_gain or 0 }}，修为 +{{ reward_summary.cultivation_gain or 0 }}</p>
+        {% if reward_entries %}
+        <div class="stack-list compact-stack top-gap">
+            {% for entry in reward_entries %}
+            <div class="kv-row">
+                <span>{{ format_timestamp(entry.created_at) }}</span>
+                <strong class="multiline-value">{{ entry.activity }} · {{ entry.result_label }} · {{ entry.summary_text }}</strong>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted top-gap">{{ rewards.empty_text or '暂无今日探索收益记录。' }}</p>
+        {% endif %}
+    </div>
+</section>

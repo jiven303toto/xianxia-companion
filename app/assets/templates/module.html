@@ -1,0 +1,1115 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section-header">
+    <p>模块详情</p>
+    <h1>{{ module.name }}</h1>
+    <p class="hero-text">{{ module.summary }}</p>
+</section>
+
+{% if module.key == 'cultivation' %}
+    {% include 'modules/cultivation.html' %}
+{% endif %}
+
+{% if module.key == 'sect' %}
+    {% include 'modules/sect.html' %}
+{% endif %}
+
+{% if module.key == 'artifact' %}
+    {% include 'modules/artifact.html' %}
+{% endif %}
+
+{% if module.key == 'other' %}
+    {% include 'modules/other.html' %}
+{% endif %}
+
+{% if module.key == 'estate' %}
+    {% include 'modules/estate.html' %}
+{% endif %}
+
+{% if module.key == 'dungeon' %}
+    {% include 'modules/dungeon.html' %}
+{% endif %}
+
+{% if module.key == 'stock' %}
+    {% include 'modules/stock.html' %}
+{% endif %}
+
+{% if module.key == 'inventory' %}
+    {% include 'modules/inventory.html' %}
+{% endif %}
+
+{% if module.key == 'fishing' %}
+    {% include 'modules/fishing.html' %}
+{% endif %}
+
+{% if module.key == 'small_world' %}
+    {% include 'modules/small_world.html' %}
+{% endif %}
+
+{% if module.key == 'market' %}
+    {% include 'modules/market.html' %}
+{% endif %}
+
+{% if module.key == 'tianxing' %}
+    {% include 'modules/tianxing.html' %}
+{% endif %}
+
+<style>
+.overview-stat-value {
+    display: block;
+    font-size: 34px;
+    line-height: 1.15;
+}
+.other-overview-card {
+    min-height: 168px;
+}
+.other-dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+}
+.other-dashboard-main {
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.other-core-grid {
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    align-items: start;
+}
+.other-core-grid > .detail-card {
+    min-height: 420px;
+    height: fit-content;
+}
+.other-auto-grid {
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+    align-items: start;
+}
+.other-auto-grid > .detail-card {
+    min-height: 420px;
+    height: 100%;
+}
+.other-auto-grid .form-grid {
+    grid-template-columns: 1fr;
+}
+.other-auto-grid .action-row {
+    width: 100%;
+}
+.other-auto-grid .action-row button,
+.other-auto-grid button[type="submit"] {
+    width: 100%;
+}
+.other-auto-grid input,
+.other-auto-grid select {
+    min-width: 0;
+    width: 100%;
+}
+.artifact-card-tab-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 14px;
+}
+.artifact-card-tab {
+    justify-content: center;
+    width: 100%;
+}
+.artifact-card-tab.active {
+    border-color: var(--accent-gold);
+    background: rgba(212, 175, 55, 0.1);
+    color: var(--accent-gold);
+}
+[data-artifact-tab-panel][hidden] {
+    display: none;
+}
+.other-low-frequency-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin: -8px 0 20px;
+}
+.other-low-frequency-toggle {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 18px;
+    border-radius: 999px;
+    border-color: var(--border-light);
+    background:
+        linear-gradient(180deg, var(--theme-card-sheen), transparent),
+        var(--theme-button-bg);
+    color: var(--theme-button-text);
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    box-shadow:
+        0 10px 22px rgba(23, 85, 62, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+.other-low-frequency-toggle::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--border-highlight);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--border-highlight) 16%, transparent);
+    transform: rotate(45deg);
+}
+.other-low-frequency-toggle:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: var(--border-highlight);
+    background:
+        linear-gradient(180deg, var(--theme-button-sheen), transparent),
+        var(--theme-button-hover-bg);
+    color: var(--accent-jade);
+    box-shadow:
+        var(--shadow-glow-gold),
+        inset 0 1px 0 var(--theme-card-sheen);
+}
+.other-low-frequency-toggle[aria-expanded="true"] {
+    border-color: var(--border-highlight);
+    background:
+        linear-gradient(135deg, var(--theme-active-gradient-start), var(--theme-active-gradient-end));
+    color: var(--theme-active-text);
+    box-shadow:
+        var(--shadow-glow-gold),
+        inset 0 1px 0 color-mix(in srgb, var(--theme-active-text) 28%, transparent);
+}
+.other-low-frequency-toggle[aria-expanded="true"]::before {
+    background: var(--theme-active-text);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--theme-active-text) 18%, transparent);
+}
+.other-low-frequency-panel {
+    margin-top: 26px;
+}
+.other-low-frequency-grid {
+    grid-template-columns: repeat(3, minmax(260px, 1fr));
+    align-items: stretch;
+}
+.other-low-frequency-grid > .detail-card {
+    min-height: 300px;
+    height: 100%;
+}
+.other-play-form {
+    grid-template-columns: 1fr;
+}
+.other-play-form button[type="submit"],
+.other-play-form input,
+.other-play-form select {
+    width: 100%;
+}
+.other-play-extra-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.mulan-daily-card {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    min-height: 0;
+}
+.tianji-remnant-card {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    min-height: 0;
+}
+.companion-daily-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+}
+.companion-daily-card {
+    min-height: 0;
+}
+.companion-daily-card .section-header.compact {
+    margin-bottom: 18px;
+}
+.companion-daily-layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 0.72fr) minmax(0, 1.28fr);
+    gap: 18px;
+    align-items: start;
+}
+.companion-daily-section {
+    min-width: 0;
+}
+.companion-daily-actions {
+    padding-left: 18px;
+    border-left: 1px dashed var(--border-color);
+}
+.companion-daily-card .companion-command-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    min-width: 0;
+    max-width: 100%;
+}
+.companion-daily-card .companion-command-row button,
+.companion-daily-card .companion-vow-picker {
+    min-width: 0;
+    width: 100%;
+}
+.companion-daily-card .companion-command-row button {
+    justify-content: center;
+    padding-inline: 10px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+.companion-daily-card .companion-vow-picker {
+    justify-content: space-between;
+}
+.companion-daily-card .companion-vow-picker select,
+.companion-daily-card .companion-vow-picker input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+}
+.mulan-daily-card .section-header.compact,
+.tianji-remnant-card .section-header.compact {
+    margin-bottom: 18px;
+}
+.tianji-trial-action-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(360px, 1fr);
+    gap: 10px;
+    align-items: end;
+}
+.tianji-trial-main-form,
+.tianji-trial-daily-form {
+    min-width: 0;
+}
+.tianji-trial-daily-form {
+    display: grid;
+    grid-template-columns: minmax(112px, 136px) minmax(180px, 1fr);
+    gap: 8px;
+    align-items: end;
+}
+.tianji-trial-main-form .inline-button,
+.tianji-trial-daily-form .inline-button {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+}
+.tianji-trial-time-control {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.tianji-trial-time-control span {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.tianji-trial-time-control input {
+    width: 100%;
+}
+.mulan-daily-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.48fr) minmax(0, 1.52fr);
+    gap: 18px;
+    align-items: start;
+}
+.mulan-daily-section {
+    min-width: 0;
+}
+.mulan-daily-section-title {
+    margin: 0 0 10px;
+    color: var(--accent-gold);
+    font-family: var(--font-serif);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+.mulan-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px 14px;
+}
+.mulan-stat {
+    min-width: 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.mulan-stat-wide {
+    grid-column: 1 / -1;
+}
+.mulan-stat span {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+.mulan-stat strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+.mulan-intel-block + .mulan-intel-block {
+    margin-top: 14px;
+}
+.mulan-intel-label,
+.mulan-action-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+.mulan-intel-label em {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-style: normal;
+}
+.mulan-daily-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+.mulan-daily-list li {
+    overflow-wrap: anywhere;
+}
+.mulan-action-group + .mulan-action-group,
+.mulan-plan-form {
+    margin-top: 14px;
+}
+.mulan-daily-actions {
+    grid-column: 1 / -1;
+    padding-top: 14px;
+    border-top: 1px dashed var(--border-color);
+}
+.mulan-action-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    min-width: 0;
+    max-width: 100%;
+}
+.mulan-tool-row {
+    grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+}
+.mulan-action-row form,
+.mulan-action-row button,
+.mulan-plan-form button {
+    min-width: 0;
+    width: 100%;
+}
+.mulan-action-row button,
+.mulan-plan-form button {
+    justify-content: center;
+    padding-inline: 10px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+.mulan-plan-note {
+    margin: 8px 0 0;
+}
+.pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.estate-action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.estate-action-btn {
+    width: 100%;
+    white-space: normal;
+}
+.estate-hunt-daily-form {
+    display: grid;
+    grid-template-columns: minmax(112px, 136px) minmax(180px, 1fr);
+    gap: 8px;
+    align-items: end;
+}
+.estate-hunt-daily-form .estate-action-btn {
+    min-height: 44px;
+}
+.estate-hunt-time-control {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.estate-hunt-time-control span {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.estate-hunt-time-control input {
+    width: 100%;
+}
+.estate-detail-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.estate-message-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.estate-message-item {
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.scroll-panel {
+    max-height: 260px;
+    overflow: auto;
+}
+.inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+.inventory-item-card {
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.inventory-grid-compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+.inventory-grid-compact .inventory-item-card {
+    padding: 10px;
+}
+.inventory-grid-compact .stock-card-head {
+    gap: 8px;
+}
+.inventory-grid-compact .inventory-item-meta {
+    gap: 6px;
+    margin-top: 8px;
+}
+.inventory-grid-compact .muted.top-gap {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.inventory-scroll-panel {
+    max-height: 560px;
+    overflow: auto;
+    padding-right: 4px;
+}
+.inventory-item-card.equipped {
+    border-color: rgba(212, 175, 55, 0.4);
+    box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.1);
+}
+.inventory-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+.inventory-count-badge {
+    border-color: rgba(255, 196, 44, 0.45);
+    background: rgba(255, 196, 44, 0.12);
+    color: #ffd36a;
+    font-weight: 700;
+    min-width: 54px;
+    justify-content: center;
+    font-size: 0.95rem;
+}
+:root[data-theme="jade"] .inventory-item-card {
+    min-height: 132px;
+    padding: 18px 18px 16px;
+    border-color: rgba(82, 201, 141, 0.28);
+    border-radius: 8px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(247, 252, 249, 0.32)),
+        var(--theme-countdown-card-texture),
+        linear-gradient(145deg, rgba(221, 248, 234, 0.42), rgba(255, 255, 255, 0.48));
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-blend-mode: normal, normal, normal;
+    box-shadow:
+        0 12px 28px rgba(23, 85, 62, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    color: #17362c;
+}
+:root[data-theme="jade"] .inventory-item-card:hover {
+    border-color: rgba(22, 168, 106, 0.44);
+    box-shadow:
+        0 16px 34px rgba(23, 85, 62, 0.13),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+:root[data-theme="jade"] .inventory-item-card.equipped {
+    border-color: rgba(22, 168, 106, 0.58);
+    box-shadow:
+        0 0 0 2px rgba(82, 201, 141, 0.22),
+        0 16px 34px rgba(23, 85, 62, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+:root[data-theme="jade"] .inventory-item-card .stock-card-head strong {
+    color: #17362c;
+    font-weight: 800;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="material"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="材料"] .stock-card-head strong {
+    color: #0f7155;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="treasure"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="法宝"] .stock-card-head strong {
+    color: #9b6415;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="elixir"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="丹药"] .stock-card-head strong {
+    color: #be5a18;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="quest_item"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="任务道具"] .stock-card-head strong {
+    color: #6c55c8;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="recipe"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="图纸"] .stock-card-head strong {
+    color: #1d6aa8;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="talisman"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="符箓"] .stock-card-head strong {
+    color: #b84f8d;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="formation"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="阵法"] .stock-card-head strong {
+    color: #4d66c0;
+}
+:root[data-theme="jade"] .inventory-item-card[data-item-raw-type="seed"] .stock-card-head strong,
+:root[data-theme="jade"] .inventory-item-card[data-item-type="种子"] .stock-card-head strong {
+    color: #5d7c24;
+}
+:root[data-theme="jade"] .inventory-item-card .muted {
+    color: #56766b;
+}
+:root[data-theme="jade"] .inventory-item-card .muted.top-gap {
+    padding-left: 8px;
+    border-left: 2px solid rgba(22, 168, 106, 0.3);
+    color: #4d7064;
+}
+:root[data-theme="jade"] .inventory-item-card .pill {
+    border-color: rgba(82, 201, 141, 0.3);
+    background: rgba(255, 255, 255, 0.68);
+    color: #42685b;
+}
+:root[data-theme="jade"] .inventory-item-card .inventory-count-badge {
+    border-color: rgba(194, 139, 26, 0.52);
+    background: linear-gradient(180deg, rgba(255, 242, 184, 0.95), rgba(242, 199, 78, 0.88));
+    color: #785000;
+    font-weight: 900;
+    box-shadow:
+        0 4px 12px rgba(185, 130, 36, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+:root[data-theme="jade"] .inventory-item-card .small-btn {
+    border-color: rgba(82, 201, 141, 0.34);
+    background: rgba(255, 255, 255, 0.56);
+    color: #2f6d5b;
+}
+:root[data-theme="jade"] .inventory-item-card .small-btn:hover:not(:disabled) {
+    border-color: rgba(22, 168, 106, 0.54);
+    background: rgba(221, 248, 234, 0.72);
+    color: #087246;
+}
+.artifact-command-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.artifact-command-btn {
+    width: 100%;
+}
+.inventory-toolbar-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.inventory-toolbar-row .inventory-search-toolbar {
+    margin-bottom: 0;
+}
+.inventory-bulk-copy-wrap {
+    display: flex;
+    justify-content: flex-end;
+    align-items: end;
+}
+.inventory-copy-status {
+    margin: 0 0 12px;
+    word-break: break-all;
+}
+.market-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(180px, auto);
+    gap: 12px;
+    align-items: end;
+}
+.market-toolbar.inventory-search-toolbar {
+    width: min(430px, 100%);
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) auto;
+    justify-content: start;
+    gap: 8px;
+}
+.market-toolbar.inventory-search-toolbar label {
+    width: 100%;
+    min-width: 0;
+}
+.market-toolbar.inventory-search-toolbar .action-row {
+    justify-content: flex-start;
+}
+.market-buy-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.market-buy-form input[type='number'] {
+    width: 88px;
+}
+.market-buy-form input[type='text'] {
+    min-width: 200px;
+    flex: 1 1 220px;
+}
+.dungeon-tab-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.dungeon-help-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.dungeon-help-item {
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.dungeon-help-item code {
+    display: inline-block;
+    margin-bottom: 8px;
+}
+.quick-fill-btn {
+    margin-top: 8px;
+}
+.dungeon-composer-sticky {
+    position: sticky;
+    top: 12px;
+    z-index: 8;
+    backdrop-filter: blur(10px);
+    padding: 16px 0 18px;
+    border-top: 1px solid rgba(45, 145, 112, 0.16);
+    border-bottom: 1px solid rgba(45, 145, 112, 0.16);
+}
+.dungeon-command-row {
+    gap: 12px 16px;
+    margin-bottom: 16px;
+}
+.dungeon-composer-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+}
+.dungeon-command-input {
+    flex: 1 1 420px;
+    min-height: 44px;
+    background: rgba(247, 251, 255, 0.96);
+    border-color: rgba(74, 139, 166, 0.48);
+    color: var(--text-primary);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+.dungeon-command-input::placeholder {
+    color: rgba(76, 105, 116, 0.72);
+}
+.dungeon-command-input:focus {
+    border-color: rgba(44, 129, 166, 0.84);
+    box-shadow: 0 0 0 3px rgba(44, 129, 166, 0.16);
+}
+.command-list.compact-list {
+    margin: 0;
+    padding-left: 18px;
+}
+.dungeon-feed-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.dungeon-feed-item {
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: var(--bg-surface);
+}
+.dungeon-feed-item.bot {
+    box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.08);
+}
+.dungeon-feed-item.user {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+.dungeon-feed-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.dungeon-reply-preview {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-left: 3px solid rgba(212, 175, 55, 0.7);
+    border-radius: 10px;
+    background: rgba(212, 175, 55, 0.08);
+    color: var(--text-secondary);
+}
+.dungeon-feed-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.stock-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.stock-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: var(--bg-surface);
+    overflow: hidden;
+    padding: 14px;
+}
+.stock-card-clickable {
+    cursor: pointer;
+    transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+.stock-card-clickable:hover,
+.stock-card-clickable:focus-visible {
+    border-color: rgba(212, 175, 55, 0.45);
+    transform: translateY(-1px);
+    outline: none;
+    background: rgba(20, 20, 20, 0.94);
+}
+.stock-card-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+}
+.stock-card-price {
+    margin-top: 10px;
+    font-size: 22px;
+    line-height: 1.15;
+}
+.stock-card-subtitle {
+    margin-top: 4px;
+}
+.stock-compact-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.stock-compact-meta span {
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+}
+.stock-card-details,
+.stock-history-block {
+    padding: 0;
+}
+.stock-history-head,
+.stock-history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.stock-history-head {
+    margin-bottom: 8px;
+}
+.stock-sparkline {
+    width: 100%;
+    height: 72px;
+    color: rgba(212, 175, 55, 0.92);
+    border-radius: 10px;
+    background: rgba(212, 175, 55, 0.04);
+}
+.stock-history-meta {
+    margin-top: 6px;
+    font-size: 12px;
+}
+.stock-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+}
+.stock-card-footer {
+    display: flex;
+    justify-content: flex-end;
+}
+.stock-card-note {
+    font-size: 12px;
+}
+.stock-modal-card {
+    width: min(840px, 94vw);
+    margin: auto;
+    border-radius: 12px;
+}
+.stock-modal-toolbar {
+    display: grid;
+    grid-template-columns: minmax(180px, 220px) repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+.stock-modal-summary-row {
+    height: 100%;
+}
+.stock-modal-status {
+    min-height: 20px;
+}
+.stock-modal-chart-shell {
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+}
+.stock-modal-list {
+    max-height: 360px;
+}
+.stock-modal-empty {
+    margin: 0;
+}
+.stock-history-item {
+    padding: 6px 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    font-size: 12px;
+}
+.stock-feed-text {
+    max-height: 320px;
+    overflow: auto;
+}
+.stock-change {
+    font-weight: 700;
+}
+.stock-change.up {
+    color: var(--error);
+}
+.stock-change.down {
+    color: var(--success);
+}
+@media (min-width: 1081px) {
+    .other-core-grid > .wild-experience-card {
+        grid-column: 2;
+        grid-row: 1;
+    }
+}
+@media (max-width: 1080px) {
+    .overview-stat-value {
+        font-size: 28px;
+    }
+    .estate-detail-grid {
+        grid-template-columns: 1fr;
+    }
+    .inventory-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .inventory-grid-compact {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    .stock-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .stock-modal-toolbar {
+        grid-template-columns: 1fr;
+    }
+    .market-toolbar,
+    .dungeon-help-grid,
+    .other-dashboard-grid,
+    .other-core-grid,
+    .other-auto-grid,
+    .other-low-frequency-grid {
+        grid-template-columns: 1fr;
+    }
+    .companion-daily-panel,
+    .tianji-remnant-card,
+    .mulan-daily-card {
+        grid-column: auto;
+    }
+    .companion-daily-layout,
+    .mulan-daily-layout {
+        grid-template-columns: 1fr;
+    }
+    .companion-daily-actions {
+        padding-left: 0;
+        padding-top: 14px;
+        border-left: 0;
+        border-top: 1px dashed var(--border-color);
+    }
+}
+@media (max-width: 720px) {
+    .estate-action-grid {
+        grid-template-columns: 1fr;
+    }
+    .estate-hunt-daily-form {
+        grid-template-columns: 1fr;
+    }
+    .dungeon-composer-sticky {
+        top: 0;
+    }
+    .stock-grid {
+        grid-template-columns: 1fr;
+    }
+    .inventory-grid {
+        grid-template-columns: 1fr;
+    }
+    .market-toolbar.inventory-search-toolbar {
+        width: 100%;
+        grid-template-columns: 1fr;
+    }
+    .inventory-toolbar-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .inventory-bulk-copy-wrap,
+    .inventory-bulk-copy-wrap .inline-button {
+        width: 100%;
+    }
+    .artifact-command-grid {
+        grid-template-columns: 1fr;
+    }
+    .tianji-trial-action-grid,
+    .tianji-trial-daily-form,
+    .mulan-stat-grid,
+    .mulan-action-row,
+    .mulan-tool-row {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% if module.key not in ['cultivation', 'sect', 'artifact', 'inventory', 'fishing', 'small_world', 'market', 'other', 'estate', 'dungeon', 'stock', 'tianxing'] %}
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>基础法阵</p>
+            <h2>指令参阅</h2>
+        </div>
+        {% if module_commands %}
+        <ul>
+            {% for command in module_commands %}
+            <li style="font-family: var(--font-mono); color: var(--accent-gold);"><code>{{ command }}</code></li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">此偏门阵法尚未镌刻法旨参考。</p>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+{% if module.key not in ['cultivation', 'sect', 'artifact', 'inventory', 'fishing', 'small_world', 'market', 'other', 'estate', 'dungeon', 'stock', 'tianxing'] %}
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>阵法脉络</p>
+            <h2>已成体系</h2>
+        </div>
+        <ul style="color: var(--text-primary);">
+            {% for item in module.capabilities %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>天机推演</p>
+            <h2>大道未尽</h2>
+        </div>
+        <ul>
+            {% for item in module.next_steps %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</section>
+{% endif %}
+
+{% if module.key not in ['cultivation', 'sect', 'artifact', 'inventory', 'fishing', 'small_world', 'market', 'other', 'estate', 'dungeon', 'stock', 'tianxing'] %}
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>本命枢纽</p>
+            <h2>灵能运转周天</h2>
+        </div>
+        {% if active_profile and module_setting %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>修士道号</span><strong style="color: var(--accent-cyan);">{{ active_profile.name }}</strong></div>
+            <div class="kv-row"><span>聚灵状态</span><strong style="color: {% if module_setting.enabled %}var(--accent-jade){% else %}var(--text-muted){% endif %};">{{ '已激活' if module_setting.enabled else '已封印' }}</strong></div>
+            <div class="kv-row"><span>息阵时辰</span><strong>{{ module_setting.cooldown_seconds }} 息</strong></div>
+            <div class="kv-row"><span>轮转间隙</span><strong>{{ module_setting.check_interval_seconds }} 息</strong></div>
+            <div class="kv-row"><span>刻录法旨</span><strong style="font-family: var(--font-mono);">{{ module_setting.command_template or '未拓印' }}</strong></div>
+        </div>
+        <form class="top-gap" method="post" action="/modules/{{ module.key }}/toggle">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <input type="hidden" name="enabled" value="{{ '0' if module_setting.enabled else '1' }}">
+            <button class="button" type="submit" style="width: 100%;">{{ '切断灵力供给' if module_setting.enabled else '注入灵力激活' }}</button>
+        </form>
+        {% else %}
+        <p class="muted">未见神识入阵，或该阵法尚未镌刻于天机碑。</p>
+        {% endif %}
+    </div>
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>重塑阵图</p>
+            <h2>玉简铭刻</h2>
+        </div>
+        {% if active_profile %}
+        <form class="form-grid" method="post" action="/modules/{{ module.key }}/settings">
+            <input type="hidden" name="profile_id" value="{{ active_profile.id }}">
+            <label>
+                聚灵状态
+                <select name="enabled">
+                    <option value="1" {% if not module_setting or module_setting.enabled %}selected{% endif %}>灵力充盈 (enabled)</option>
+                    <option value="0" {% if module_setting and not module_setting.enabled %}selected{% endif %}>阵眼干涸 (disabled)</option>
+                </select>
+            </label>
+            <label>
+                息阵时辰 (秒)
+                <input name="cooldown_seconds" type="number" min="0" value="{{ module_setting.cooldown_seconds if module_setting else 30 }}">
+            </label>
+            <label>
+                轮转间隙 (秒)
+                <input name="check_interval_seconds" type="number" min="0" value="{{ module_setting.check_interval_seconds if module_setting else 300 }}">
+            </label>
+            <label class="full-span">
+                天道法旨
+                <input name="command_template" value="{{ module_setting.command_template if module_setting else '' }}" placeholder="例如：.查看闭关 / .宗门悬赏 / .进入秘境">
+            </label>
+            <label class="full-span">
+                道途感悟
+                <textarea name="notes" rows="4" placeholder="在此镌刻你的修仙心得与避劫要诀...">{{ module_setting.notes if module_setting else '' }}</textarea>
+            </label>
+            <div class="full-span">
+                <button class="button" type="submit" style="width: 100%; border-color: var(--accent-gold); color: var(--accent-gold);">重塑法阵铭文</button>
+            </div>
+        </form>
+        {% else %}
+        <p class="muted" style="color: var(--error);">神识迷失，请归原点 (首页) 重聚真身。</p>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section-header">
+    <p>自动任务</p>
+    <h1>机缘时辰</h1>
+    <span class="pill">{{ countdown_items|length }} 项</span>
+    <p class="hero-text">集中查看当前已开启自动任务和相关机缘时辰。</p>
+</section>
+
+{% if countdown_items %}
+<section class="detail-grid countdown-overview-grid">
+    {% for item in countdown_items %}
+    <a class="detail-card countdown-overview-card" href="{{ item.href }}">
+        <div class="countdown-overview-topline">
+            <span>{{ item.module_name }}</span>
+            {% if item.badge %}
+            <strong>{{ item.badge }}</strong>
+            {% endif %}
+        </div>
+        <h2 class="countdown-title countdown-title-{{ item.tone or 'default' }}">{{ item.title }}</h2>
+        <div class="countdown-overview-status">
+            <span>{{ item.status }}</span>
+            {% if item.countdown_target %}
+            <strong class="countdown-text" data-countdown-target="{{ item.countdown_target }}">{{ item.countdown_display }}</strong>
+            {% else %}
+            <strong>{{ item.countdown_display }}</strong>
+            {% endif %}
+        </div>
+        {% if item.detail %}
+        <p class="muted">{{ item.detail }}</p>
+        {% endif %}
+        {% if item.target_display != '-' %}
+        <p class="countdown-overview-target">{{ item.target_display }}</p>
+        {% endif %}
+    </a>
+    {% endfor %}
+</section>
+{% else %}
+<section class="detail-card">
+    <div class="section-header compact">
+        <p>自动任务</p>
+        <h2>暂无开启的倒计时</h2>
+    </div>
+    <p class="muted">开启自动抚摸、自动引星盘或其他自动任务后，会在这里集中显示。</p>
+</section>
+{% endif %}
+
+<style>
+.countdown-overview-grid {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.countdown-overview-card {
+    display: flex;
+    min-height: 170px;
+    flex-direction: column;
+    gap: 14px;
+    text-decoration: none;
+    color: inherit;
+}
+.countdown-overview-card h2 {
+    margin: 0;
+}
+.countdown-overview-card .countdown-title {
+    color: var(--text-primary);
+}
+.countdown-overview-card .countdown-title-cultivation { color: #e8c46a; }
+.countdown-overview-card .countdown-title-rift { color: #caa5ff; }
+.countdown-overview-card .countdown-title-yuanying { color: #87d7ff; }
+.countdown-overview-card .countdown-title-pagoda { color: #ff9a76; }
+.countdown-overview-card .countdown-title-wild { color: #8fdc8f; }
+.countdown-overview-card .countdown-title-voyage { color: #f2a7d5; }
+.countdown-overview-card .countdown-title-mulan { color: #ffb86b; }
+.countdown-overview-card .countdown-title-dream { color: #c5d86d; }
+.countdown-overview-card .countdown-title-divination { color: #7dd3c7; }
+.countdown-overview-card .countdown-title-artifact { color: #ffcf86; }
+.countdown-overview-card .countdown-title-yuanying-wendao { color: #87d7ff; }
+.countdown-overview-card .countdown-title-yuanying-retreat { color: #8ee6d1; }
+.countdown-overview-card .countdown-title-yinluo-sacrifice { color: #ffcf86; }
+.countdown-overview-card .countdown-title-yinluo-blood-wash { color: #ff9a76; }
+.countdown-overview-card .countdown-title-yinluo-shadow { color: #caa5ff; }
+.countdown-overview-card .countdown-title-yinluo-refine { color: #8ee6d1; }
+.countdown-overview-card .countdown-title-tianxing-observe { color: #9fe6c5; }
+.countdown-overview-card .countdown-title-tianxing-predict { color: #f7d774; }
+.countdown-overview-card .countdown-title-tianxing-change { color: #ffb86b; }
+.countdown-overview-card .countdown-title-tianji-trial { color: #7dd3c7; }
+.countdown-overview-card .countdown-title-estate-hunt { color: #ffcf86; }
+.countdown-overview-card .countdown-title-starboard-auto { color: #9fb7ff; }
+.countdown-overview-card .countdown-title-starboard { color: #bfa4ff; }
+.countdown-overview-card .countdown-title-wanling { color: #9ee6b8; }
+.countdown-overview-card .countdown-title-small-world-auto { color: #ffd166; }
+.countdown-overview-card .countdown-title-small-world-prayer { color: #f7b2d9; }
+.countdown-overview-card .countdown-title-small-world-preach { color: #8ee6d1; }
+.countdown-overview-topline,
+.countdown-overview-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.countdown-overview-topline span,
+.countdown-overview-status span,
+.countdown-overview-target {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.countdown-overview-topline strong {
+    color: var(--accent-gold);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.countdown-overview-status strong {
+    color: var(--text-primary);
+    font-size: 15px;
+}
+.countdown-overview-target {
+    margin-top: auto;
+}
+</style>
+{% endblock %}

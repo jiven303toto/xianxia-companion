@@ -1,0 +1,205 @@
+<style>
+.small-world-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+.small-world-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.small-world-command-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+.small-world-command-grid button {
+    width: 100%;
+}
+.small-world-auto-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.small-world-auto-grid label {
+    min-width: 0;
+}
+@media (max-width: 1080px) {
+    .small-world-grid,
+    .small-world-stat-grid,
+    .small-world-command-grid,
+    .small-world-auto-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<section class="detail-grid small-world-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>紫府天地</p>
+            <h2>{{ small_world_state.owner_name ~ '的小世界' if small_world_state.owner_name else '小世界状态' }}</h2>
+        </div>
+        {% if small_world_state.opened %}
+        <div class="small-world-stat-grid">
+            <div class="kv-row"><span>神庙</span><strong>Lv.{{ small_world_state.temple_level }} {{ small_world_state.temple_name }}</strong></div>
+            <div class="kv-row"><span>人口</span><strong>{{ small_world_state.population or '-' }}</strong></div>
+            <div class="kv-row"><span>承载上限</span><strong>{{ small_world_state.capacity or '-' }}</strong></div>
+            <div class="kv-row"><span>信仰</span><strong>{{ small_world_state.faith or '-' }}</strong></div>
+            <div class="kv-row"><span>稳定</span><strong>{{ small_world_state.stability or '-' }}</strong></div>
+            <div class="kv-row"><span>待收香火</span><strong>{{ small_world_state.pending_incense or '-' }}</strong></div>
+            <div class="kv-row"><span>香火库存</span><strong>{{ small_world_state.incense_stock or '-' }}</strong></div>
+            <div class="kv-row"><span>预计产出</span><strong>{{ small_world_state.incense_per_hour or '-' }}</strong></div>
+            <div class="kv-row"><span>护界禁制</span><strong>{{ small_world_state.barrier or '-' }}</strong></div>
+            <div class="kv-row"><span>神识强度</span><strong>{{ small_world_state.divine_sense or '-' }}</strong></div>
+        </div>
+        {% if small_world_state.next_upgrade_cost %}
+        <p class="muted top-gap">下一阶：{{ small_world_state.next_upgrade_cost }}</p>
+        {% endif %}
+        {% elif small_world_state.available %}
+        <p class="muted">当前角色尚未开辟小世界，可手动发送 `.开辟小世界`。</p>
+        {% else %}
+        <p class="muted">暂无当前角色的小世界回包。先点“刷新小世界”，等 bot 回复后这里会展示状态。</p>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>凡人祈愿</p>
+            <h2>{{ small_world_state.prayer_title or '暂无祈愿记录' }}</h2>
+        </div>
+        {% if small_world_state.prayer_title %}
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>显灵消耗</span><strong>{{ small_world_state.prayer_cost or '-' }}</strong></div>
+            {% if small_world_state.prayer_cooldown %}
+            <div class="kv-row"><span>感应等待</span><strong>{{ small_world_state.prayer_cooldown }}</strong></div>
+            {% endif %}
+        </div>
+        <p class="muted top-gap">{{ small_world_state.prayer_description }}</p>
+        {% else %}
+        <p class="muted">没有解析到待处理祈愿。自动显灵只会在刷新到祈愿且没有祈愿倒计时时执行。</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>自动小世界</p>
+            <h2>{{ '运行中' if small_world_auto_state.active else '未开启' }}</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>下次检查</span><strong {% if small_world_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ small_world_auto_state.next_run_target }}"{% endif %}>{{ small_world_auto_state.next_run_display }}</strong></div>
+            <div class="kv-row"><span>祈愿感应</span><strong {% if small_world_auto_state.prayer_cooldown_target %}class="countdown-text" data-countdown-target="{{ small_world_auto_state.prayer_cooldown_target }}"{% endif %}>{{ small_world_auto_state.prayer_cooldown_display }}</strong></div>
+            <div class="kv-row"><span>神迹布道</span><strong {% if small_world_auto_state.preach_cooldown_target %}class="countdown-text" data-countdown-target="{{ small_world_auto_state.preach_cooldown_target }}"{% endif %}>{{ small_world_auto_state.preach_cooldown_display }}</strong></div>
+        </div>
+        <form class="form-grid small-world-auto-grid top-gap" method="post" action="/runtime/small-world/auto">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/small_world">
+            <input type="hidden" name="enabled" value="{{ '0' if small_world_auto_state.active else '1' }}">
+            <label>
+                自动收割
+                <select name="collect_enabled">
+                    <option value="1" {% if small_world_auto_state.collect_enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not small_world_auto_state.collect_enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
+                收割阈值
+                <input name="collect_threshold" type="number" min="0" step="0.01" value="{{ small_world_auto_state.collect_threshold }}">
+            </label>
+            <label>
+                自动显灵
+                <select name="manifest_enabled">
+                    <option value="1" {% if small_world_auto_state.manifest_enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not small_world_auto_state.manifest_enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
+                自动布道
+                <select name="preach_enabled">
+                    <option value="1" {% if small_world_auto_state.preach_enabled %}selected{% endif %}>开启</option>
+                    <option value="0" {% if not small_world_auto_state.preach_enabled %}selected{% endif %}>关闭</option>
+                </select>
+            </label>
+            <label>
+                检查间隔分钟
+                <input name="refresh_interval_minutes" type="number" min="5" step="1" value="{{ small_world_auto_state.refresh_interval_minutes }}">
+            </label>
+            <div class="action-row" style="align-items: end;">
+                <button type="submit" class="inline-button auto-toggle-button{% if small_world_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动小世界' if small_world_auto_state.active else '开启自动小世界' }}</button>
+                <button
+                    type="submit"
+                    formaction="/runtime/small-world/preach-auto"
+                    formmethod="post"
+                    class="inline-button auto-toggle-button{% if small_world_preach_auto_state.active %} active{% endif %}"
+                    {% if not command_chat_ready or small_world_preach_auto_state.button_disabled %}disabled{% endif %}
+                >{{ '停止自动神迹布道' if small_world_preach_auto_state.active else '开启自动神迹布道' }}</button>
+            </div>
+        </form>
+        {% if small_world_auto_state.last_error %}
+        <p class="muted top-gap">{{ small_world_auto_state.last_error }}</p>
+        {% endif %}
+        <p class="muted top-gap">自动任务每轮先刷新 `.小世界`，最多只发送一条操作命令；收到该命令回包后才结束本轮。人口、信仰、稳定都满时才会跳过自动显灵，神迹布道倒计时只来自 `.神迹 布道` 回包。</p>
+    </div>
+</section>
+
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>手动指令</p>
+            <h2>小世界操作</h2>
+        </div>
+        <div class="small-world-command-grid">
+            {% for command, label in small_world_manual_commands %}
+            <form method="post" action="/runtime/commands/send-raw">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/small_world">
+                <input type="hidden" name="text" value="{{ command }}">
+                <button type="submit" class="inline-button" {% if not command_chat_ready %}disabled{% endif %}>{{ label }}</button>
+            </form>
+            {% endfor %}
+        </div>
+        {% if not command_chat_ready %}
+        <p class="muted top-gap">当前未绑定有效游戏群，无法直接发送小世界指令。</p>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>带参数指令</p>
+            <h2>淬炼与寄养</h2>
+        </div>
+        <form class="form-grid" method="post" action="/runtime/commands/send-raw">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/small_world">
+            <label class="full-span">
+                指令
+                <input name="text" value=".神识淬炼 100" placeholder=".神识淬炼 100 / .寄养灵兽 猪皮" required>
+            </label>
+            <div class="full-span action-row">
+                <button type="submit" {% if not command_chat_ready %}disabled{% endif %}>发送</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="detail-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>最近回包</p>
+            <h2>.小世界</h2>
+        </div>
+        {% if small_world_state.raw_text %}
+        <div class="message-text">{{ small_world_state.raw_text }}</div>
+        {% else %}
+        <p class="muted">暂无 `.小世界` 回包记录。</p>
+        {% endif %}
+    </div>
+</section>

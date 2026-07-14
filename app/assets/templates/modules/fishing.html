@@ -1,0 +1,217 @@
+<style>
+.fishing-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.fishing-form-grid label {
+    min-width: 0;
+}
+.fishing-form-grid input,
+.fishing-form-grid select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+}
+.fishing-catch-card {
+    grid-column: 1 / -1;
+}
+.fishing-manual-command-card {
+    grid-column: 1 / -1;
+}
+@media (max-width: 1280px) {
+    .fishing-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<section class="detail-grid three-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>钓鱼状态</p>
+            <h2>鱼篓与鱼讯</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>自动钓鱼</span><strong style="color: {% if fishing_state.active %}var(--success){% else %}var(--text-muted){% endif %};">{{ '已开启' if fishing_state.active else '未开启' }}</strong></div>
+            <div class="kv-row"><span>当前状态</span><strong>{{ fishing_state.state_label }}</strong></div>
+            <div class="kv-row"><span>今日竿数</span><strong>{{ fishing_state.daily_text }}</strong></div>
+            <div class="kv-row"><span>下次动作</span><strong>{{ fishing_state.next_action_display }}</strong></div>
+            <div class="kv-row"><span>鱼塘</span><strong>{{ fishing_state.pond }}</strong></div>
+            <div class="kv-row"><span>鱼饵</span><strong>{{ fishing_state.bait }}</strong></div>
+            <div class="kv-row"><span>自动打窝</span><strong style="color: {% if fishing_state.auto_nest %}var(--success){% else %}var(--text-muted){% endif %};">{{ '已开启' if fishing_state.auto_nest else '未开启' }}</strong></div>
+            <div class="kv-row"><span>打窝目标</span><strong>{{ fishing_state.nest }}</strong></div>
+            <div class="kv-row"><span>打窝次数</span><strong>{{ fishing_state.nest_used_count }}/{{ fishing_state.nest_limit }}</strong></div>
+            <div class="kv-row"><span>鱼竿</span><strong>{{ fishing_state.rod_text }}</strong></div>
+            <div class="kv-row"><span>钓术</span><strong>{{ fishing_state.skill_text }}</strong></div>
+            <div class="kv-row"><span>窝料</span><strong>{{ fishing_state.current_nest }}</strong></div>
+            <div class="kv-row"><span>最近鱼获</span><strong>{{ fishing_state.last_fish_name }}</strong></div>
+        </div>
+        {% if fishing_state.last_error %}
+        <p class="muted top-gap" style="color: var(--error);">{{ fishing_state.last_error }}</p>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>入口诊断</p>
+            <h2>MiniApp 接入诊断</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>接入阶段</span><strong>入口诊断 / 自动接管</strong></div>
+            <div class="kv-row"><span>入口状态</span><strong>{{ fishing_state.miniapp_entry.status_label }}</strong></div>
+            <div class="kv-row"><span>Host</span><strong>{{ fishing_state.miniapp_entry.host }}</strong></div>
+            <div class="kv-row"><span>入口按钮</span><strong>{{ fishing_state.miniapp_entry.button_text }}</strong></div>
+            <div class="kv-row"><span>Start 类型</span><strong>{{ fishing_state.miniapp_entry.start_param_kind }}</strong></div>
+            <div class="kv-row"><span>Start 后缀</span><strong>{{ fishing_state.miniapp_entry.start_param_suffix }}</strong></div>
+            <div class="kv-row"><span>Start 摘要</span><strong>{{ fishing_state.miniapp_entry.start_param_digest }}</strong></div>
+            <div class="kv-row"><span>敏感字段</span><strong>{{ fishing_state.miniapp_entry.sensitive_keys_text }}</strong></div>
+        </div>
+        <p class="muted top-gap">安全边界：{{ fishing_state.miniapp_entry.safety_boundary }}</p>
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>鱼饵</p>
+            <h2>当前库存</h2>
+        </div>
+        {% if fishing_state.baits %}
+        <div class="stack-list compact-stack">
+            {% for name, count in fishing_state.baits %}
+            <div class="kv-row"><span>{{ name }}</span><strong>x{{ count }}</strong></div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted">暂无鱼饵记录，先刷新鱼篓。</p>
+        {% endif %}
+        {% if fishing_state.nest_baits %}
+        <div class="section-header compact top-gap">
+            <p>窝料</p>
+            <h2>库存记录</h2>
+        </div>
+        <div class="stack-list compact-stack">
+            {% for name, count in fishing_state.nest_baits %}
+            <div class="kv-row"><span>{{ name }}</span><strong>x{{ count }}</strong></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="detail-card fishing-catch-card">
+        <div class="section-header compact">
+            <p>鱼获</p>
+            <h2>鱼篓清单</h2>
+        </div>
+        {% if fishing_state.catches %}
+        <div class="stack-list compact-stack">
+            {% for name, count in fishing_state.catches %}
+            <div class="kv-row"><span>{{ name }}</span><strong>x{{ count }}</strong></div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted">暂无鱼获记录，先刷新鱼篓。</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="detail-grid two-column-grid">
+    <div class="detail-card fishing-manual-command-card">
+        <div class="section-header compact">
+            <p>手动命令</p>
+            <h2>钓鱼操作</h2>
+            <div class="tg-minigame-notice">TG-MINIGAME：仅可在 Telegram 小程序内进行</div>
+        </div>
+        <form class="form-grid" method="post" action="/runtime/commands/send-raw">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/fishing">
+            <label class="full-span">
+                发送指令
+                <input name="text" value="{{ fishing_state.command_preview }}">
+            </label>
+            <div class="full-span action-row">
+                <button type="submit" {% if not command_chat_ready %}disabled{% endif %}>发送</button>
+            </div>
+        </form>
+        <div class="action-row top-gap" style="flex-wrap: wrap;">
+            {% for command in ['.渔具铺', '.鱼篓', '.钓鱼状态', '.试探咬饵', '.提竿', '.收竿', '.钓鱼榜', '.钓鱼图鉴'] %}
+            <form method="post" action="/runtime/commands/send-raw">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/fishing">
+                <input type="hidden" name="text" value="{{ command }}">
+                <button type="submit" class="inline-button" {% if not command_chat_ready %}disabled{% endif %}>{{ command }}</button>
+            </form>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="detail-grid two-column-grid">
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>资源操作</p>
+            <h2>鱼饵、窝料、开鱼</h2>
+        </div>
+        <form id="fishing-bait-buy-form" class="form-grid fishing-form-grid" method="post" action="/runtime/commands/send-raw">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="/modules/fishing">
+            <label>
+                购买鱼饵
+                <select id="fishing-buy-bait">
+                    {% for option in fishing_state.bait_options %}
+                    <option value="{{ option.name }}" {% if option.name == fishing_state.bait %}selected{% endif %}>{{ option.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                数量
+                <input id="fishing-buy-count" type="number" min="1" step="1" value="20">
+            </label>
+            <label class="full-span">
+                发送指令
+                <input id="fishing-buy-command" name="text" value=".买鱼饵 {{ fishing_state.bait }} 20">
+            </label>
+            <div class="full-span action-row">
+                <button type="submit" {% if not command_chat_ready %}disabled{% endif %}>发送资源指令</button>
+            </div>
+        </form>
+        <p class="muted top-gap">常用：`.买鱼饵 凡饵 20`、`.打窝 米糠小窝`、`.开鱼 青鳞小鲫 1`。</p>
+    </div>
+
+    <div class="detail-card">
+        <div class="section-header compact">
+            <p>最近回包</p>
+            <h2>钓鱼消息</h2>
+        </div>
+        {% if fishing_state.last_result_text %}
+        <div class="message-text">{{ fishing_state.last_result_text }}</div>
+        {% else %}
+        <p class="muted">暂无钓鱼回包记录。</p>
+        {% endif %}
+    </div>
+</section>
+
+<script>
+(function () {
+    const baitSelect = document.getElementById('fishing-buy-bait');
+    const countInput = document.getElementById('fishing-buy-count');
+    const commandInput = document.getElementById('fishing-buy-command');
+    if (!baitSelect || !countInput || !commandInput) {
+        return;
+    }
+    function syncBaitCommand() {
+        const bait = baitSelect.value || '凡饵';
+        const count = Math.max(parseInt(countInput.value || '1', 10) || 1, 1);
+        commandInput.value = `.买鱼饵 ${bait} ${count}`;
+    }
+    baitSelect.addEventListener('change', syncBaitCommand);
+    countInput.addEventListener('input', syncBaitCommand);
+    syncBaitCommand();
+})();
+</script>

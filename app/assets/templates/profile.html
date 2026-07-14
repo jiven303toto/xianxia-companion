@@ -1,0 +1,512 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="section-header">
+    <p>角色与认</p>
+    <h1>角色真身</h1>
+    <p class="hero-text">此处总揽修士身份，承接天机阁玉简，并绑定 Telegram 神识。</p>
+</section>
+
+<section class="workspace-grid">
+    <div class="detail-card" id="profiles" style="grid-column: 1 / -1;">
+        <div class="section-header compact">
+            <p>人物信息</p>
+            <h2>本命元神档案</h2>
+        </div>
+        
+        {% if profiles and profiles|length > 1 %}
+        <div class="stack-list compact-stack" style="margin-bottom: 24px;">
+            <div class="profile-switch-toolbar">
+                <div class="profile-switch-toolbar-header">
+                    <span class="profile-switch-toolbar-title">所有元神档案（多账号切换）</span>
+                    <button class="inline-button profile-card-toggle" type="button" data-profile-card-toggle aria-expanded="false">显示全部档案（{{ profiles|length }}）</button>
+                </div>
+                <div class="profile-switch-toolbar-actions">
+                    {% set stop_profile_name = active_profile.name if active_profile else '未选择' %}
+                    {% if active_profile and active_profile.telegram_username %}
+                    {% set stop_profile_tg = '@' ~ active_profile.telegram_username %}
+                    {% elif active_profile and active_profile.telegram_user_id %}
+                    {% set stop_profile_tg = active_profile.telegram_user_id %}
+                    {% else %}
+                    {% set stop_profile_tg = '未绑定' %}
+                    {% endif %}
+                    <div class="profile-bulk-protect-picker">
+                        <span>护持档案</span>
+                        <select id="profile-bulk-protected-select" class="profile-bulk-native-select" aria-hidden="true" tabindex="-1">
+                            <option value="0" {% if bulk_cultivation_protected_profile_id == 0 %}selected{% endif %}>不护持任何档案</option>
+                            {% for p in profiles %}
+                            {% set protected_label = profile_telegram_names.get(p.id) or p.name %}
+                            <option value="{{ p.id }}" {% if p.id == bulk_cultivation_protected_profile_id %}selected{% endif %}>{{ protected_label }} · 第 {{ p.id }} 档</option>
+                            {% endfor %}
+                        </select>
+                        <div class="profile-guard-picker" data-profile-guard-picker>
+                            <button class="profile-guard-trigger" type="button" data-profile-guard-trigger aria-haspopup="listbox" aria-expanded="false">
+                                <span data-profile-guard-current>护持档案</span>
+                                <span class="profile-guard-caret" aria-hidden="true"></span>
+                            </button>
+                            <div class="profile-guard-menu" data-profile-guard-menu role="listbox" hidden>
+                                <button type="button" role="option" class="profile-guard-option" data-profile-guard-value="0" aria-selected="{{ 'true' if bulk_cultivation_protected_profile_id == 0 else 'false' }}">不护持任何档案</button>
+                                {% for p in profiles %}
+                                {% set protected_label = profile_telegram_names.get(p.id) or p.name %}
+                                <button type="button" role="option" class="profile-guard-option" data-profile-guard-value="{{ p.id }}" aria-selected="{{ 'true' if p.id == bulk_cultivation_protected_profile_id else 'false' }}">{{ protected_label }} · 第 {{ p.id }} 档</button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    <form method="post" action="/profiles/bulk-cultivation" data-profile-bulk-form data-confirm-dialog data-confirm-title="开启全部普通闭关" data-confirm-message="确认将除护持档案外的所有已绑定元神切换并开启普通闭关？" data-global-loading data-loading-message="正在开启全部普通闭关">
+                        <input type="hidden" name="mode" value="normal">
+                        <input type="hidden" name="protected_profile_id" value="{{ bulk_cultivation_protected_profile_id }}" data-profile-bulk-protected-input>
+                        <button class="inline-button profile-bulk-toggle profile-bulk-toggle-normal {% if all_profile_cultivation_state.all_normal %}is-on{% else %}is-off{% endif %}" type="submit">
+                            <span>{{ '已开' if all_profile_cultivation_state.all_normal else '未开' }}</span>
+                            全部普通闭关
+                        </button>
+                    </form>
+                    <form method="post" action="/profiles/bulk-cultivation" data-profile-bulk-form data-confirm-dialog data-confirm-title="开启全部深度闭关" data-confirm-message="确认将除护持档案外的所有已绑定元神切换并开启深度闭关？" data-global-loading data-loading-message="正在开启全部深度闭关">
+                        <input type="hidden" name="mode" value="deep">
+                        <input type="hidden" name="protected_profile_id" value="{{ bulk_cultivation_protected_profile_id }}" data-profile-bulk-protected-input>
+                        <button class="inline-button profile-bulk-toggle profile-bulk-toggle-deep {% if all_profile_cultivation_state.all_deep %}is-on{% else %}is-off{% endif %}" type="submit">
+                            <span>{{ '已开' if all_profile_cultivation_state.all_deep else '未开' }}</span>
+                            全部深度闭关
+                        </button>
+                    </form>
+                    <form method="post" action="/profiles/stop-current-schedules" data-confirm-dialog data-confirm-title="停止当前元神调度" data-confirm-message="确认停止当前选中的元神档案：{{ stop_profile_name }}（TG：{{ stop_profile_tg }}）的所有调度任务？" data-global-loading data-loading-message="正在停止当前元神调度任务">
+                        <input type="hidden" name="confirm_1" value="">
+                        <input type="hidden" name="confirm_2" value="">
+                        <input type="hidden" name="confirm_3" value="">
+                        <button class="inline-button profile-stop-current-button" type="submit">停止当前元神调度</button>
+                    </form>
+                    <form method="post" action="/profiles/refresh-all-info" data-global-loading data-loading-message="正在探寻全部元神">
+                        <button class="inline-button" type="submit" {% if not can_refresh_all_profiles %}disabled{% endif %}>探寻全部元神</button>
+                    </form>
+                </div>
+            </div>
+            <p class="muted profile-bulk-protect-hint">提示：选择护持档案后，全部普通闭关、全部深度闭关会跳过它；选择“不护持任何档案”时，会影响全部已绑定元神。</p>
+            {% if refresh_all_result %}
+            <p class="muted" style="margin: 4px 0 0;">已更新 {{ refresh_all_result.ok }} 个，失败 {{ refresh_all_result.failed }} 个，跳过 {{ refresh_all_result.skipped }} 个。</p>
+            {% endif %}
+            {% if profile_bulk_result %}
+            <p class="muted" style="margin: 4px 0 0;">已为 {{ profile_bulk_result.updated }} 个元神开启{{ '深度闭关' if profile_bulk_result.mode == 'deep' else '普通闭关' }}，护持跳过 {{ profile_bulk_result.protected }} 个，跳过 {{ profile_bulk_result.skipped }} 个未绑定元神。</p>
+            {% endif %}
+            {% if stop_current_result %}
+            <p class="muted" style="margin: 4px 0 0; color: var(--error);">已停止当前元神的所有调度任务，并取消 {{ stop_current_result.outgoing_cancelled }} 条未完成发送队列。</p>
+            {% endif %}
+            <div class="profile-inventory-search" id="profile-inventory-search">
+                <form class="profile-inventory-search-form" method="get" action="/profile#profile-inventory-search" data-profile-inventory-search-form data-global-loading data-loading-message="正在检索随身储物">
+                    <label>
+                        跨元神搜索随身储物
+                        <input name="profile_inventory_q" value="{{ profile_inventory_search.query }}" placeholder="输入物品关键字" data-profile-inventory-search-input>
+                    </label>
+                    <button class="inline-button" type="submit">搜索</button>
+                    <a class="inline-button profile-inventory-search-clear" href="/profile#profile-inventory-search">清空</a>
+                </form>
+                <div class="profile-search-history" data-profile-inventory-search-history aria-label="历史搜索关键词" hidden></div>
+                {% if profile_inventory_search.query %}
+                    {% if profile_inventory_search.results %}
+                    <div class="profile-inventory-search-results">
+                        {% for item in profile_inventory_search.results %}
+                        <div class="profile-inventory-search-item">
+                            <div>
+                                <strong>{{ item.name }}</strong>
+                                <span>{{ item.type or '物品' }}</span>
+                            </div>
+                            <div class="profile-inventory-search-total">总计 {{ item.quantity }}</div>
+                            <div class="profile-inventory-search-profiles">
+                                {% for owner in item.profiles %}
+                                <span>{{ owner.profile_name }}（{{ owner.telegram_label }}） x{{ owner.quantity }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="muted profile-inventory-search-empty">未找到匹配物品。</p>
+                    {% endif %}
+                {% endif %}
+            </div>
+            <div class="profile-switch-panel" data-profile-card-panel hidden data-profile-count="{{ profiles|length }}">
+            <div class="profile-switch-grid">
+                {% for p in profiles %}
+                {% set is_current_profile = active_profile and active_profile.id == p.id %}
+                {% set character_name = p.game_name or p.display_name or p.account_name or p.name %}
+                {% set card_cultivation = all_profile_cultivation_state.profiles.get(p.id) %}
+                <div class="profile-switch-card{% if is_current_profile %} is-active{% endif %}" {% if is_current_profile %}aria-current="true"{% else %}data-profile-switch-card{% endif %}>
+                    <span class="profile-switch-card-topline">
+                        <span>元神档案</span>
+                        <strong>{{ '当前真身' if is_current_profile else '可切换' }}</strong>
+                    </span>
+                    <div class="profile-switch-card-title-row">
+                        <span class="profile-switch-card-title">{{ character_name }}</span>
+                        <span class="profile-switch-cultivation-status {{ 'is-running' if card_cultivation and card_cultivation.enabled else 'is-idle' }}">
+                            <strong>{{ card_cultivation.status_text if card_cultivation else '自动闭关未开启' }}</strong>
+                            <span class="profile-cultivation-mode {{ 'is-deep' if card_cultivation and card_cultivation.mode == 'deep' else 'is-normal' }}">{{ card_cultivation.mode_text if card_cultivation else '普通闭关' }}</span>
+                        </span>
+                    </div>
+                    <span class="profile-switch-card-row">
+                        <span>姓名</span>
+                        <strong>{{ profile_telegram_names.get(p.id, '未绑定') }}</strong>
+                    </span>
+                    <span class="profile-switch-card-row">
+                        <span>TG</span>
+                        <strong>{{ ('@' ~ p.telegram_username) if p.telegram_username else (p.telegram_user_id or '未绑定') }}</strong>
+                    </span>
+                    <div class="profile-switch-card-actions">
+                        <form class="profile-switch-card-action-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                            <input type="hidden" name="redirect_to" value="/countdowns">
+                            <button type="submit" class="inline-button small-btn profile-countdown-shortcut">机缘时辰</button>
+                        </form>
+                        <form class="profile-switch-card-action-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                            <input type="hidden" name="redirect_to" value="/modules/inventory">
+                            <button type="submit" class="inline-button small-btn profile-inventory-shortcut">随身储物</button>
+                        </form>
+                        <form class="profile-switch-card-action-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                            <input type="hidden" name="redirect_to" value="/modules/other">
+                            <button type="submit" class="inline-button small-btn profile-other-shortcut">三界游历</button>
+                        </form>
+                        <form class="profile-switch-card-action-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                            <input type="hidden" name="redirect_to" value="/modules/estate">
+                            <button type="submit" class="inline-button small-btn profile-estate-shortcut">私人仙府</button>
+                        </form>
+                        {% if not is_current_profile %}
+                        <form class="profile-switch-card-default-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神" data-profile-switch-default-form aria-hidden="true">
+                            <input type="hidden" name="redirect_to" value="/profile">
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if active_profile %}
+        {% set profile_cultivation_enabled = cultivation_session and cultivation_session.enabled %}
+        {% set profile_cultivation_mode = '深度闭关' if cultivation_session and cultivation_session.retreat_mode == 'deep' else '普通闭关' %}
+        {% set profile_cultivation_next_time = cultivation_session.next_check_time if cultivation_session and cultivation_session.next_check_time else 0 %}
+        <div class="profile-card-shell" style="border-color: var(--accent-gold);">
+            <div class="profile-card-body">
+                <div class="profile-card-header">
+                    <h3 style="font-size: 24px; color: var(--accent-gold);">{{ active_profile.game_name or active_profile.display_name or '无名道友' }}</h3>
+                    <form class="profile-refresh-current-form" method="post" action="/profiles/{{ active_profile.id }}/refresh-info" data-global-loading data-loading-message="正在探寻当前元神">
+                        <button class="button profile-refresh-current-button" type="submit" {% if not active_profile.telegram_verified_at or not external_account or external_account.status != 'connected' %}disabled{% endif %}>探寻天机更新</button>
+                    </form>
+                </div>
+                <div class="profile-info-grid">
+                    <div><span>天机阁玉简</span><strong>{{ active_profile.account_name or '未绑定' }}</strong></div>
+                    {% set profile_artifact_text = active_profile.artifact_text or '' %}
+                    <div class="full-profile-span"><span>御使法宝</span><strong class="multiline-value profile-artifact-value" style="color: var(--accent-purple);">{% if profile_artifact_text %}{% set profile_artifact_lines = profile_artifact_text.replace('\r\n', '\n').replace('\r', '\n').replace(' - ', '\n- ').split('\n') %}{% for artifact_line in profile_artifact_lines %}{% set clean_artifact_line = artifact_line.strip() %}{% if clean_artifact_line %}<span class="profile-artifact-item">{{ clean_artifact_line }}</span>{% if not loop.last %}<span class="profile-artifact-separator"> </span>{% endif %}{% endif %}{% endfor %}{% else %}赤手空拳{% endif %}</strong></div>
+                    <div><span>仙门</span><strong>{{ active_profile.sect_name or '无门无派' }}</strong></div>
+                    {% if active_profile.sect_position %}
+                    <div><span>尊位</span><strong style="color: var(--accent-gold);">{{ active_profile.sect_position }}</strong></div>
+                    {% endif %}
+                    <div><span>阵法加持</span><strong>{{ (active_profile.sect_bonus_text ~ '%') if active_profile.sect_bonus_text else '无' }}</strong></div>
+                    <div><span>灵根资质</span><strong style="color: var(--accent-gold);">{{ active_profile.spirit_root or '未卜' }}</strong></div>
+                    <div><span>当前境界</span><strong style="color: var(--accent-jade);">{{ active_profile.stage_name or '未踏足' }}</strong></div>
+                    <div><span>法力源泉</span><strong>{{ active_profile.cultivation_text or '未修炼' }}</strong></div>
+                    <div><span>识海广度</span><strong>{{ character_state.shenshi_points }} 缕</strong></div>
+                    <div><span>体内丹毒</span><strong style="color: var(--error);">{{ active_profile.poison_text or '0' }}</strong></div>
+                    <div><span>造下杀孽</span><strong>{{ active_profile.kill_count_text or '清白' }}</strong></div>
+                    <div class="full-profile-span"><span>仙门贡献</span><strong class="contribution-action">{{ active_profile.sect_contribution_text or '0' }}<button type="button" class="inline-button small-btn" onclick="openSectExchangeModal()" {% if not command_chat_ready or not (sect_treasury_items or []) %}disabled{% endif %}>宝库兑换</button></strong></div>
+                    <div><span>灵石</span><strong style="color: var(--accent-gold);">{{ profile_spirit_stones }}</strong></div>
+                    {% if companion_state.available %}
+                    <div><span>侍妾情缘</span><strong style="color: var(--accent-gold);">{{ companion_state.affection }}</strong></div>
+                    {% endif %}
+                    <div><span>下次闭关调度</span><strong style="color: var(--accent-jade);">{{ format_timestamp(profile_cultivation_next_time) if profile_cultivation_next_time else '未排程' }}</strong></div>
+                </div>
+                {% if rift_failure_state %}
+                <div class="detail-card top-gap" style="margin-top: 16px; border-color: var(--error); background: rgba(164, 42, 42, 0.08);">
+                    <div class="section-header compact">
+                        <p>异常状态</p>
+                        <h2 style="color: var(--error);">{{ rift_failure_state.title }}</h2>
+                    </div>
+                    <div class="stack-list compact-stack">
+                        <div class="kv-row"><span>当前名号</span><strong>{{ rift_failure_state.dao_name or '一缕残魂' }}</strong></div>
+                        <div class="kv-row"><span>当前境界</span><strong>{{ rift_failure_state.stage_name or '-' }}</strong></div>
+                        <div class="kv-row"><span>状态码</span><strong style="font-family: var(--font-mono);">{{ rift_failure_state.status }}</strong></div>
+                    </div>
+                    <p class="muted top-gap" style="color: var(--error);">{{ rift_failure_state.summary }}</p>
+                </div>
+                {% endif %}
+                <div class="action-row top-gap">
+                    <span class="profile-cultivation-status {{ 'is-running' if profile_cultivation_enabled else 'is-idle' }}">
+                        <strong>{{ '自动闭关已开启' if profile_cultivation_enabled else '自动闭关未开启' }}</strong>
+                        <span class="profile-cultivation-mode {{ 'is-deep' if cultivation_session and cultivation_session.retreat_mode == 'deep' else 'is-normal' }}">{{ profile_cultivation_mode }}</span>
+                    </span>
+                    {% if not active_profile.telegram_verified_at %}
+                    <span class="muted" style="color: var(--error);">请先完成 Telegram 神识连接</span>
+                    {% elif external_account and external_account.status == 'expired' %}
+                    <span class="muted" style="color: var(--error);">天机阁会话已散去，请重聚灵气 (更新 Cookie)</span>
+                    {% elif external_account and external_account.status == 'logged_out' %}
+                    <span class="muted" style="color: var(--error);">已脱离天机阁，请重新打上神识印记</span>
+                    {% elif not external_account or external_account.status != 'connected' %}
+                    <span class="muted" style="color: var(--warning);">请先通过天机阁认证</span>
+                    {% endif %}
+                    <span class="muted" style="margin-left: auto;">天机推演时辰：{{ format_timestamp(active_profile.info_updated_at) }}</span>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <p class="muted">档案大殿空荡无物，请先凝聚元神创建角色。</p>
+        <form class="form-grid" method="post" action="/profiles">
+            <label class="full-span">
+                道号/代称
+                <input name="name" placeholder="例如：主修仙体" required>
+            </label>
+            <div class="full-span">
+                <button type="submit" class="button" style="width: 100%;">凝聚元神 (创建角色)</button>
+            </div>
+        </form>
+        {% endif %}
+    </div>
+
+    <div class="detail-card" id="chats">
+        <div class="section-header compact profile-telegram-header">
+            <div>
+                <p>神识连接</p>
+                <h2>当前锁定秘境 (Telegram 配置)</h2>
+            </div>
+            {% if is_admin_profile %}
+            <form method="post" action="/runtime/telegram-bots/sync" data-global-loading data-loading-message="正在扫描最近 5000 条群消息并同步 Bot">
+                <button type="submit" class="inline-button profile-bot-sync-button">同步群 Bot</button>
+            </form>
+            {% endif %}
+        </div>
+        <div class="stack-list compact-stack">
+            <div class="kv-row"><span>神识锚点 (Chat ID)</span><strong style="font-family: var(--font-mono);">{{ bound_chat_id or '未锁定' }}</strong></div>
+            <div class="kv-row"><span>分支因果 (Thread)</span><strong style="font-family: var(--font-mono);">{{ bound_thread_id or '主干道' }}</strong></div>
+            <div class="kv-row"><span>秘境类型</span><strong>{{ bound_chat_type or 'group' }}</strong></div>
+        </div>
+        {% if bot_schedule_state %}
+        <div class="profile-bot-schedule-panel top-gap" data-bot-schedule-panel>
+            <div class="profile-bot-schedule-header">
+                <div>
+                    <p>Bot 自动同步</p>
+                    <strong>群 Bot 定时检查与全 profile 同步</strong>
+                </div>
+                <span class="profile-bot-schedule-status {{ bot_schedule_state.status_class }}" data-bot-schedule-status>{{ bot_schedule_state.state_label }}</span>
+            </div>
+            <div class="profile-bot-schedule-grid">
+                <div><span>执行周期</span><strong>每 {{ bot_schedule_state.interval_hours }} 小时</strong></div>
+                <div><span>服务器时间</span><strong>{{ bot_schedule_state.server_time }}</strong></div>
+                <div><span>本轮首次执行</span><strong>{{ bot_schedule_state.first_run }}</strong></div>
+                <div><span>下次执行</span><strong>{{ bot_schedule_state.next_run }}</strong></div>
+                <div><span>上次执行</span><strong>{{ bot_schedule_state.last_run }}</strong></div>
+                <div><span>最近结果</span><strong>{{ bot_schedule_state.latest_summary }}</strong></div>
+                <div><span>最近耗时</span><strong>{% if bot_schedule_state.last_elapsed_seconds is not none %}{{ '%.1f'|format(bot_schedule_state.last_elapsed_seconds) }} 秒{% else %}尚无{% endif %}</strong></div>
+                <div><span>群上 Bot</span><strong>{{ bot_schedule_state.last_live_bot_count if bot_schedule_state.last_live_bot_count is not none else '尚无' }}</strong></div>
+                <div><span>可信 Bot</span><strong>{{ bot_schedule_state.last_trusted_bot_count if bot_schedule_state.last_trusted_bot_count is not none else '尚无' }}</strong></div>
+                <div><span>检查调度</span><strong>{{ bot_schedule_state.last_schedule_tasks_checked if bot_schedule_state.last_schedule_tasks_checked is not none else '尚无' }}</strong></div>
+                <div><span>过期任务</span><strong>{{ bot_schedule_state.last_schedule_overdue_count if bot_schedule_state.last_schedule_overdue_count is not none else '尚无' }}</strong></div>
+                <div><span>重新入队</span><strong>{{ bot_schedule_state.last_schedule_requeued_count if bot_schedule_state.last_schedule_requeued_count is not none else '尚无' }}</strong></div>
+                <div><span>跳过任务</span><strong>{{ bot_schedule_state.last_schedule_skipped_count if bot_schedule_state.last_schedule_skipped_count is not none else '尚无' }}</strong></div>
+            </div>
+            {% if bot_schedule_state.last_schedule_skip_reasons %}
+            <p class="profile-bot-schedule-skip-reasons">跳过原因：{{ bot_schedule_state.last_schedule_skip_reasons }}</p>
+            {% endif %}
+            {% if bot_schedule_state.error %}
+            <p class="profile-bot-schedule-error">{{ bot_schedule_state.error }}</p>
+            {% endif %}
+            <form class="profile-bot-schedule-form" method="post" action="/runtime/telegram-bots/schedule/update" data-global-loading data-loading-message="正在更新 Bot 自动同步周期">
+                <label>
+                    执行间隔
+                    <select name="interval_hours">
+                        {% for interval in bot_schedule_state.interval_options %}
+                        <option value="{{ interval }}" {% if interval == bot_schedule_state.interval_hours %}selected{% endif %}>每 {{ interval }} 小时</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="inline-button">保存周期</button>
+            </form>
+            <p class="muted">保存周期或重新开启后，本轮首次执行时间 = 服务器当前时间 + 执行周期。</p>
+            <div class="profile-bot-schedule-actions">
+                <form method="post" action="/runtime/telegram-bots/schedule/toggle" data-global-loading data-loading-message="正在更新 Bot 自动同步状态">
+                    <input type="hidden" name="enabled" value="{{ 0 if bot_schedule_state.enabled else 1 }}">
+                    <button type="submit" class="inline-button {% if bot_schedule_state.enabled %}profile-bot-schedule-disable{% endif %}">{{ '关闭自动同步' if bot_schedule_state.enabled else '开启自动同步' }}</button>
+                </form>
+                <span class="muted">关闭只影响后续任务，不终止正在运行的扫描。</span>
+            </div>
+            {% if bot_schedule_state.last_output %}
+            <details class="profile-bot-schedule-log">
+                <summary>查看最近执行记录</summary>
+                <pre>{{ bot_schedule_state.last_output }}</pre>
+            </details>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="top-gap" style="border-top: 1px dashed var(--border-color); padding-top: 18px;">
+            <div class="profile-bot-list-header">
+                <label class="profile-bot-search-label">
+                    <span>当前群绑定的 Bot 列表</span>
+                    <input type="search" placeholder="检索 Bot ID 或 username" autocomplete="off" data-profile-bot-search>
+                </label>
+                <span class="muted" data-profile-bot-count>共 {{ current_chat_binding_bot_total }} 个 Bot</span>
+            </div>
+            <p class="muted profile-bot-scan-meta">
+                {% if current_chat_binding_bot_scan_available %}
+                存活状态来自最近同步扫描：{{ current_chat_binding_bot_scanned_at }}
+                {% else %}
+                尚无同步扫描快照，执行一次 <code>--apply</code> 后显示群上存活状态。
+                {% endif %}
+            </p>
+            {% set bot_rows = current_chat_binding_bot_rows or [] %}
+            {% if bot_rows %}
+            <div class="stack-list compact-stack profile-bot-scroll-list" data-profile-bot-list>
+                {% for bot in bot_rows %}
+                <div class="kv-row profile-bot-row" data-profile-bot-row data-profile-bot-search-text="{{ bot.value }} {{ bot.username }} @{{ bot.username }}">
+                    <span class="profile-bot-identity">
+                        <strong style="font-family: var(--font-mono);">{{ bot.value }}</strong>
+                        <span class="muted" style="margin-left: 10px;">{{ bot.username_label }}</span>
+                        <span class="profile-bot-status {% if bot.is_primary %}is-primary{% elif bot.is_live %}is-live{% elif current_chat_binding_bot_scan_available %}is-history{% else %}is-pending{% endif %}">{{ bot.status_label }}</span>
+                    </span>
+                    <form method="post" action="/profiles/{{ active_profile.id }}/chat-bindings/{{ current_chat_binding.chat_id if current_chat_binding else bound_chat_id }}/bot-ids/remove" style="margin: 0;">
+                        <input type="hidden" name="bot_id" value="{{ bot.value }}">
+                        <input type="hidden" name="thread_id" value="{{ current_chat_binding.thread_id if current_chat_binding and current_chat_binding.thread_id is not none else '' }}">
+                        <input type="hidden" name="redirect_to" value="/profile#chats">
+                        <button type="submit" class="inline-button small-btn">删除</button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            <p class="muted profile-bot-empty" data-profile-bot-empty hidden>未找到匹配的 Bot。</p>
+            {% else %}
+            <p class="muted">当前绑定尚未配置 bot id，系统将尝试使用代码仓默认值。</p>
+            {% endif %}
+        </div>
+        <p class="muted top-gap">此为代码中固定的神识锚点，无法在界面篡改。</p>
+    </div>
+</section>
+<script>
+function mountProfileBulkProtection() {
+    const select = document.getElementById('profile-bulk-protected-select');
+    if (!select) return;
+    const picker = document.querySelector('[data-profile-guard-picker]');
+    const trigger = document.querySelector('[data-profile-guard-trigger]');
+    const menu = document.querySelector('[data-profile-guard-menu]');
+    const current = document.querySelector('[data-profile-guard-current]');
+    const options = Array.from(document.querySelectorAll('[data-profile-guard-value]'));
+
+    const setExpanded = (expanded) => {
+        if (!trigger || !menu || !picker) return;
+        trigger.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        menu.hidden = !expanded;
+        picker.classList.toggle('is-open', expanded);
+    };
+
+    const sync = () => {
+        const selectedOption = select.options[select.selectedIndex];
+        const selectedValue = (select.value || '0').trim();
+        const label = selectedOption ? selectedOption.textContent.trim() : selectedValue;
+        if (current) {
+            current.textContent = label;
+        }
+        options.forEach((option) => {
+            option.setAttribute('aria-selected', option.dataset.profileGuardValue === selectedValue ? 'true' : 'false');
+        });
+        document.querySelectorAll('[data-profile-bulk-form]').forEach((form) => {
+            const input = form.querySelector('[data-profile-bulk-protected-input]');
+            if (input) input.value = selectedValue;
+            const modeInput = form.querySelector('input[name="mode"]');
+            const modeText = modeInput && modeInput.value === 'deep' ? '深度闭关' : '普通闭关';
+            form.dataset.confirmMessage = selectedValue === '0'
+                ? `确认将所有已绑定元神切换并开启${modeText}？`
+                : `确认将除护持档案（${label}）外的所有已绑定元神切换并开启${modeText}？`;
+        });
+    };
+
+    select.addEventListener('change', sync);
+    if (trigger && menu) {
+        trigger.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setExpanded(trigger.getAttribute('aria-expanded') !== 'true');
+        });
+        options.forEach((option) => {
+            option.addEventListener('click', (event) => {
+                event.stopPropagation();
+                select.value = option.dataset.profileGuardValue || '0';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                setExpanded(false);
+                trigger.focus();
+            });
+        });
+        document.addEventListener('click', (event) => {
+            if (picker && !picker.contains(event.target)) {
+                setExpanded(false);
+            }
+        });
+        trigger.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                setExpanded(false);
+            }
+        });
+    }
+    sync();
+}
+
+mountProfileBulkProtection();
+
+function mountProfileSwitchCards() {
+    document.querySelectorAll('[data-profile-switch-card]').forEach((card) => {
+        const form = card.querySelector('[data-profile-switch-default-form]');
+        if (!(form instanceof HTMLFormElement)) return;
+        card.addEventListener('click', (event) => {
+            if (event.defaultPrevented) return;
+            const target = event.target instanceof Element ? event.target : null;
+            if (!target || target.closest('button, a, input, select, textarea, label, form')) {
+                return;
+            }
+            event.preventDefault();
+            form.requestSubmit();
+        });
+    });
+}
+
+mountProfileSwitchCards();
+
+function mountProfileCardToggle() {
+    const toggle = document.querySelector('[data-profile-card-toggle]');
+    const panel = document.querySelector('[data-profile-card-panel]');
+    if (!(toggle instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return;
+    toggle.addEventListener('click', () => {
+        const willExpand = panel.hidden;
+        panel.hidden = !willExpand;
+        toggle.setAttribute('aria-expanded', willExpand ? 'true' : 'false');
+        toggle.textContent = willExpand
+            ? '隐藏全部档案'
+            : `显示全部档案（${panel.dataset.profileCount || '0'}）`;
+    });
+}
+
+mountProfileCardToggle();
+
+function mountProfileBotSearch() {
+    const input = document.querySelector('[data-profile-bot-search]');
+    const rows = Array.from(document.querySelectorAll('[data-profile-bot-row]'));
+    const count = document.querySelector('[data-profile-bot-count]');
+    const empty = document.querySelector('[data-profile-bot-empty]');
+    if (!(input instanceof HTMLInputElement) || rows.length === 0) return;
+
+    const normalize = (value) => String(value || '').trim().toLowerCase().replace(/^@/, '');
+    const filter = () => {
+        const query = normalize(input.value);
+        let visible = 0;
+        rows.forEach((row) => {
+            const searchText = normalize(row.dataset.profileBotSearchText);
+            const matched = !query || searchText.includes(query);
+            row.hidden = !matched;
+            if (matched) visible += 1;
+        });
+        if (count) {
+            count.textContent = query
+                ? `显示 ${visible} / 共 ${rows.length} 个 Bot`
+                : `共 ${rows.length} 个 Bot`;
+        }
+        if (empty) empty.hidden = visible !== 0;
+    };
+
+    input.addEventListener('input', filter);
+    filter();
+}
+
+mountProfileBotSearch();
+</script>
+{% endblock %}

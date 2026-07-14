@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天机中枢·自动证道系统</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', path='/images/themes/jade/theme-logo-jade-sword-v1.png') }}?v=20260705-jade-sword-logo-v1" data-theme-icon>
+    <link rel="preload" as="image" href="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-panel-v2.png') }}?v=20260706-jade-loading-assets-v1">
+    <link rel="preload" as="image" href="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-sword-primary-v2.png') }}?v=20260706-jade-loading-assets-v1">
+    <link rel="preload" as="image" href="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-sword-rival-v2.png') }}?v=20260706-jade-loading-assets-v1">
+    <script>
+    (function () {
+        const key = 'tianji-theme';
+        const allowed = ['jade', 'dark-gold', 'star', 'cinnabar'];
+        const fallback = 'jade';
+        const icons = {
+            'dark-gold': "{{ url_for('static', path='/images/themes/dark-gold/theme-logo-dark-gold.png') }}",
+            jade: "{{ url_for('static', path='/images/themes/jade/theme-logo-jade-sword-v1.png') }}?v=20260705-jade-sword-logo-v1",
+            star: "{{ url_for('static', path='/images/themes/star/theme-logo-star.png') }}",
+            cinnabar: "{{ url_for('static', path='/images/themes/cinnabar/theme-logo-cinnabar.png') }}",
+        };
+        let theme = fallback;
+        try {
+            const saved = window.localStorage.getItem(key);
+            if (allowed.includes(saved)) {
+                theme = saved;
+            }
+        } catch (_error) {
+            theme = fallback;
+        }
+        document.documentElement.dataset.theme = theme;
+        const icon = document.querySelector('[data-theme-icon]');
+        if (icon) {
+            icon.href = icons[theme] || icons[fallback];
+        }
+    })();
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260713-schedule-reconcile-v1">
+</head>
+<body>
+{% set current_path = request.url.path %}
+<div class="shell{% if current_path == '/profile' and profiles and profiles|length > 1 %} has-profile-rail{% endif %}">
+    <div class="theme-switcher" data-theme-switcher aria-label="皮肤切换">
+        <span class="theme-switcher-label" id="theme-switcher-label">皮肤</span>
+        <div class="theme-picker">
+            <button class="theme-trigger" type="button" data-theme-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="theme-menu" aria-labelledby="theme-switcher-label theme-current-label">
+                <span class="theme-preview" data-theme-preview="jade" data-theme-trigger-preview aria-hidden="true"></span>
+                <span class="theme-current-label" id="theme-current-label" data-theme-current>青玉洞府</span>
+                <span class="theme-trigger-caret" aria-hidden="true"></span>
+            </button>
+            <div class="theme-menu" id="theme-menu" data-theme-menu role="listbox" aria-labelledby="theme-switcher-label" hidden>
+                <button class="theme-option" type="button" role="option" data-theme-option="jade" data-theme-label="青玉洞府" aria-selected="false">
+                    <span class="theme-preview" data-theme-preview="jade" aria-hidden="true"></span>
+                    <span class="theme-option-label">青玉洞府</span>
+                </button>
+                <button class="theme-option" type="button" role="option" data-theme-option="dark-gold" data-theme-label="玄金天机" aria-selected="false">
+                    <span class="theme-preview" data-theme-preview="dark-gold" aria-hidden="true"></span>
+                    <span class="theme-option-label">玄金天机</span>
+                </button>
+                <button class="theme-option" type="button" role="option" data-theme-option="star" data-theme-label="紫微星盘" aria-selected="false">
+                    <span class="theme-preview" data-theme-preview="star" aria-hidden="true"></span>
+                    <span class="theme-option-label">紫微星盘</span>
+                </button>
+                <button class="theme-option" type="button" role="option" data-theme-option="cinnabar" data-theme-label="赤霞丹阁" aria-selected="false">
+                    <span class="theme-preview" data-theme-preview="cinnabar" aria-hidden="true"></span>
+                    <span class="theme-option-label">赤霞丹阁</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    <aside class="sidebar">
+        <a class="brand" href="/">
+            <div class="brand-mark" aria-hidden="true"></div>
+            <div>
+                <strong>天机中枢</strong>
+                <p class="brand-slogan" data-brand-slogan>凡人亦可修仙，步步皆是仙途</p>
+            </div>
+        </a>
+        <nav class="nav">
+            <a class="{% if current_path == '/profile' %}active{% endif %}" href="/profile">角色真身</a>
+            <a class="{% if current_path == '/countdowns' %}active{% endif %}" href="/countdowns">机缘时辰</a>
+            <!-- <a class="{% if current_path == '/' %}active{% endif %}" href="/">天机总览</a> -->
+            <a class="{% if current_path == '/modules/cultivation' %}active{% endif %}" href="/modules/cultivation">闭关洞府</a>
+            {% if sect_module_available %}
+            <a class="{% if current_path == '/modules/sect' %}active{% endif %}" href="/modules/sect">宗门大殿</a>
+            {% endif %}
+            <a class="{% if current_path == '/modules/other' %}active{% endif %}" href="/modules/other">三界游历</a>
+            {% if artifact_module_available %}
+            <a class="{% if current_path == '/modules/artifact' %}active{% endif %}" href="/modules/artifact">本命法宝</a>
+            {% endif %}
+            <a class="{% if current_path == '/modules/inventory' %}active{% endif %}" href="/modules/inventory">随身储物</a>
+            {% if fishing_module_available %}
+            <a class="{% if current_path == '/modules/fishing' %}active{% endif %}" href="/modules/fishing">灵溪垂钓</a>
+            {% endif %}
+            {% if small_world_module_available %}
+            <a class="{% if current_path == '/modules/small_world' %}active{% endif %}" href="/modules/small_world">小世界</a>
+            {% endif %}
+            <a class="{% if current_path == '/modules/estate' %}active{% endif %}" href="/modules/estate">私人仙府</a>
+            <!-- <a class="{% if current_path == '/modules/market' %}active{% endif %}" href="/modules/market">修真市集</a>
+            <a class="{% if current_path == '/modules/stock' %}active{% endif %}" href="/modules/stock">仙股商会</a> -->
+            <a class="{% if current_path == '/modules/dungeon' %}active{% endif %}" href="/modules/dungeon">秘境降魔</a>
+            {% if is_admin_profile %}
+            <a class="{% if current_path == '/admin/global-execution' %}active{% endif %}" href="/admin/global-execution">诸元神巡令</a>
+            {% endif %}
+        </nav>
+        {% if active_profile %}
+        <div class="sidebar-footer">
+            <p class="sidebar-status-label">当前神识链接</p>
+            <div class="sidebar-profile-actions">
+                {% set sidebar_profile_name = active_profile.name or '' %}
+                {% set sidebar_profile_name_parts = sidebar_profile_name.rsplit('-', 1) %}
+                {% set sidebar_profile_display_name = sidebar_profile_name_parts[0] if sidebar_profile_name_parts|length == 2 and sidebar_profile_name_parts[1].isdigit() else sidebar_profile_name %}
+                <a class="sidebar-profile-link inline-link" href="/login">{{ sidebar_profile_display_name }}</a>
+            </div>
+            <p class="sidebar-status-text">天机阁阵法运作正常</p>
+        </div>
+        {% endif %}
+    </aside>
+    {% if current_path == '/profile' and profiles and profiles|length > 1 %}
+    <aside class="profile-rail" data-profile-rail aria-label="元神列表">
+        <div class="profile-rail-header">
+            <strong>元神列表</strong>
+            <span class="profile-rail-count">共 <b>{{ profiles|length }}</b> 个元神</span>
+        </div>
+        <div class="profile-rail-scroll">
+            {% for p in profiles %}
+            {% set is_current_profile = active_profile and active_profile.id == p.id %}
+            {% set character_name = p.game_name or p.display_name or p.account_name or p.name %}
+            {% set telegram_label = ('@' ~ p.telegram_username) if p.telegram_username else (p.telegram_user_id or '未绑定') %}
+            {% set card_cultivation = all_profile_cultivation_state.profiles.get(p.id) %}
+            {% set cultivation_text = (p.cultivation_text or '').replace('(', '').replace(')', '') %}
+            {% set cultivation_parts = cultivation_text.split('/') %}
+            {% set cultivation_current = cultivation_parts[0].strip()|int if cultivation_parts|length == 2 else 0 %}
+            {% set cultivation_max = cultivation_parts[1].strip()|int if cultivation_parts|length == 2 else 0 %}
+            {% set cultivation_percent = (100 if cultivation_current >= cultivation_max else (cultivation_current * 100 / cultivation_max)) if cultivation_max > 0 else 0 %}
+            <article class="profile-rail-card{% if is_current_profile %} is-active{% endif %}" data-profile-rail-id="{{ p.id }}" {% if is_current_profile %}aria-current="true"{% else %}data-profile-switch-card{% endif %}>
+                <div class="profile-rail-card-heading">
+                    <strong title="{{ character_name }}">{{ character_name }}</strong>
+                    <span>{{ '当前真身' if is_current_profile else '可切换' }}</span>
+                </div>
+                <div class="profile-rail-card-meta">
+                    <span title="{{ telegram_label }}">{{ telegram_label }}</span>
+                    <strong title="{{ p.sect_name or '无门无派' }}">仙门 · {{ p.sect_name or '无门无派' }}</strong>
+                </div>
+                <div class="profile-rail-cultivation {{ 'is-running' if card_cultivation and card_cultivation.enabled else 'is-idle' }}">
+                    <strong>{{ card_cultivation.status_text if card_cultivation else '自动闭关未开启' }}</strong>
+                    <span>{{ card_cultivation.mode_text if card_cultivation else '普通闭关' }}</span>
+                </div>
+                <div class="profile-rail-progress">
+                    <div class="profile-rail-progress-heading">
+                        <span>修为进度</span>
+                        <strong>{{ '%.1f'|format(cultivation_percent) }}%</strong>
+                    </div>
+                    <div class="profile-rail-progress-track" aria-label="修为进度 {{ '%.1f'|format(cultivation_percent) }}%">
+                        <span style="width: {{ '%.2f'|format(cultivation_percent) }}%;"></span>
+                    </div>
+                    <small>经验 {{ cultivation_current }} / {{ cultivation_max if cultivation_max > 0 else '未同步' }}</small>
+                </div>
+                <div class="profile-rail-actions">
+                    <form method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                        <input type="hidden" name="redirect_to" value="/countdowns">
+                        <button type="submit" class="inline-button small-btn profile-countdown-shortcut">机缘时辰</button>
+                    </form>
+                    <form method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                        <input type="hidden" name="redirect_to" value="/modules/inventory">
+                        <button type="submit" class="inline-button small-btn profile-inventory-shortcut">随身储物</button>
+                    </form>
+                    <form method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                        <input type="hidden" name="redirect_to" value="/modules/other">
+                        <button type="submit" class="inline-button small-btn profile-other-shortcut">三界游历</button>
+                    </form>
+                    <form method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神">
+                        <input type="hidden" name="redirect_to" value="/modules/estate">
+                        <button type="submit" class="inline-button small-btn profile-estate-shortcut">私人仙府</button>
+                    </form>
+                    {% if not is_current_profile %}
+                    <form class="profile-switch-card-default-form" method="post" action="/profiles/{{ p.id }}/switch" data-global-loading data-loading-message="正在切换元神" data-profile-switch-default-form aria-hidden="true">
+                        <input type="hidden" name="redirect_to" value="/profile">
+                    </form>
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </aside>
+    {% endif %}
+    <main class="content content-route-enter">
+        {% if external_session_notice %}
+        <section class="detail-card status-card {% if external_session_notice.level == 'error' %}status-error{% else %}status-warning{% endif %}">
+            <strong>{{ external_session_notice.title }}</strong>
+            <p>{{ external_session_notice.message }} <a class="inline-link" href="/login">前往天机阁页</a></p>
+            {% if external_session_notice.detail %}
+            <p class="muted">最近错误: {{ external_session_notice.detail }}</p>
+            {% endif %}
+        </section>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
+<div id="global-loading-overlay" class="global-loading-overlay" hidden aria-live="polite" aria-busy="true">
+    <div class="global-loading-panel" role="status">
+        <img class="global-loading-panel-art" src="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-panel-v2.png') }}?v=20260706-jade-loading-assets-v1" alt="" decoding="async" fetchpriority="high" data-jade-loading-asset aria-hidden="true">
+        <div class="global-loading-visual global-loading-duel" aria-hidden="true">
+            <div class="global-loading-array"></div>
+            <div class="global-loading-trail global-loading-trail-primary"></div>
+            <div class="global-loading-trail global-loading-trail-rival"></div>
+            <div class="global-loading-sword global-loading-sword-primary">
+                <img src="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-sword-primary-v2.png') }}?v=20260706-jade-loading-assets-v1" alt="" decoding="async" fetchpriority="high" data-jade-loading-asset>
+            </div>
+            <div class="global-loading-sword global-loading-sword-rival">
+                <img src="{{ url_for('static', path='/images/themes/jade/theme-loading-jade-sword-rival-v2.png') }}?v=20260706-jade-loading-assets-v1" alt="" decoding="async" fetchpriority="high" data-jade-loading-asset>
+            </div>
+            <div class="global-loading-clash"></div>
+            <div class="global-loading-sparks"></div>
+        </div>
+        <div class="global-loading-ring" aria-hidden="true"></div>
+        <strong id="global-loading-message">正在处理</strong>
+        <span>请稍候</span>
+        <div class="global-loading-energy-slot" aria-hidden="true">
+            <span></span>
+        </div>
+    </div>
+</div>
+<dialog id="global-confirm-dialog" class="modal global-confirm-dialog">
+    <div class="modal-content detail-card global-confirm-card">
+        <div class="section-header compact">
+            <p id="global-confirm-eyebrow">二次确认</p>
+            <h2 id="global-confirm-title">确认操作</h2>
+        </div>
+        <p class="global-confirm-message" id="global-confirm-message">是否继续？</p>
+        <div class="action-row">
+            <button type="button" class="inline-button" id="global-confirm-cancel">否</button>
+            <button type="button" class="inline-button global-confirm-accept" id="global-confirm-accept">确认</button>
+        </div>
+    </div>
+</dialog>
+{% if global_result %}
+<dialog id="global-result-dialog" class="modal global-result-dialog" data-auto-open="1">
+    <div class="modal-content detail-card global-result-card">
+        <div class="section-header compact">
+            <p>Bot 同步结果</p>
+            <h2>{{ global_result.title }}</h2>
+        </div>
+        <p class="global-result-message {% if global_result.ok %}is-success{% else %}is-error{% endif %}">{{ global_result.message }}</p>
+        {% if global_result.details %}
+        <div class="global-result-details">
+            {% for label, value in global_result.details %}
+            <div class="kv-row"><span>{{ label }}</span><strong>{{ value }}</strong></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if global_result.raw_output %}
+        <details class="global-result-output">
+            <summary>查看完整脚本输出</summary>
+            <pre>{{ global_result.raw_output }}</pre>
+        </details>
+        {% endif %}
+        <div class="action-row">
+            <button type="button" class="inline-button global-result-close" data-global-result-close>关闭</button>
+        </div>
+    </div>
+</dialog>
+{% endif %}
+<dialog id="sect-exchange-modal" class="modal">
+    <div class="modal-content detail-card base-modal-card">
+        <div class="section-header compact">
+            <p id="sect-exchange-subtitle">宗门宝库</p>
+            <h2 id="sect-exchange-title">贡献兑换</h2>
+        </div>
+        <form class="form-grid top-gap" method="post" action="/runtime/commands/send-raw" id="sect-exchange-form">
+            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+            <input type="hidden" name="redirect_to" value="{{ request.url.path }}">
+            <label class="full-span">
+                宝库物品
+                <select id="sect-exchange-item-select">
+                    {% for item in sect_treasury_items or [] %}
+                    <option value="{{ item.display_name }}">{{ item.display_name }} / {{ item.display_type }} / {{ item.shop_price_text }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <div class="full-span exchange-meta-box" id="sect-exchange-meta">
+                暂无可兑换物品。
+            </div>
+            <label>
+                兑换数量
+                <input type="number" id="sect-exchange-quantity" min="1" value="1">
+            </label>
+            <label class="full-span">
+                生成指令
+                <input id="sect-exchange-command-input" name="text" required>
+            </label>
+            {% if not command_chat_ready %}
+            <p class="muted full-span">当前未绑定有效游戏群，无法直接发送兑换命令。</p>
+            {% endif %}
+            <div class="action-row full-span">
+                <button type="submit" {% if not command_chat_ready or not (sect_treasury_items or []) %}disabled{% endif %}>立即兑换</button>
+                <button type="button" class="inline-button" onclick="document.getElementById('sect-exchange-modal').close()">取消</button>
+            </div>
+        </form>
+    </div>
+</dialog>
+<script src="{{ url_for('static', path='/app.js') }}?v=20260713-tianxing-calendar-v3"></script>
+<script>
+const sectTreasuryItems = [
+    {% for item in sect_treasury_items or [] %}
+    {
+        name: {{ item.display_name | tojson }},
+        type: {{ item.display_type | tojson }},
+        priceText: {{ item.shop_price_text | tojson }},
+        description: {{ item.description | default('', true) | tojson }},
+        sectName: {{ item.sect_exclusive_label | default('通用', true) | tojson }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+function openSectExchangeModal() {
+    const modal = document.getElementById('sect-exchange-modal');
+    const subtitle = document.getElementById('sect-exchange-subtitle');
+    const title = document.getElementById('sect-exchange-title');
+    const quantityInput = document.getElementById('sect-exchange-quantity');
+    if (!modal) {
+        return;
+    }
+    subtitle.textContent = {{ (current_sect_name or '当前宗门') | tojson }} || '当前宗门';
+    title.textContent = '贡献兑换';
+    if (quantityInput) {
+        quantityInput.value = 1;
+    }
+    updateSectExchangeCommand();
+    modal.showModal();
+}
+
+function updateSectExchangeCommand() {
+    const select = document.getElementById('sect-exchange-item-select');
+    const quantityInput = document.getElementById('sect-exchange-quantity');
+    const commandInput = document.getElementById('sect-exchange-command-input');
+    const metaBox = document.getElementById('sect-exchange-meta');
+    if (!select || !commandInput || !metaBox) {
+        return;
+    }
+    const selectedName = (select.value || '').trim();
+    const quantity = Math.max(parseInt(quantityInput?.value || '1', 10) || 1, 1);
+    const selectedItem = sectTreasuryItems.find(item => item.name === selectedName);
+    if (!selectedItem) {
+        metaBox.textContent = '暂无可兑换物品。';
+        commandInput.value = '';
+        return;
+    }
+    metaBox.innerHTML = `类型：${selectedItem.type}　贡献：${selectedItem.priceText}　宗门：${selectedItem.sectName}${selectedItem.description ? `<br>${selectedItem.description}` : ''}`;
+    commandInput.value = `.兑换 ${selectedItem.name}*${quantity}`;
+}
+
+document.getElementById('sect-exchange-item-select')?.addEventListener('change', updateSectExchangeCommand);
+document.getElementById('sect-exchange-quantity')?.addEventListener('input', updateSectExchangeCommand);
+document.addEventListener('DOMContentLoaded', updateSectExchangeCommand);
+</script>
+<style>
+.base-modal-card {
+    width: 520px;
+    max-width: 92vw;
+    margin: auto;
+    border-radius: 10px;
+}
+.exchange-meta-box {
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+.contribution-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+</style>
+</body>
+</html>

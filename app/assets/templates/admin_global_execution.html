@@ -25,7 +25,7 @@
 
         <form class="admin-execution-schedule" method="post" action="/admin/global-execution/{{ card.kind }}/schedule">
             <label class="admin-execution-schedule-toggle">
-                <input type="checkbox" name="enabled" value="1" {% if card.schedule.enabled %}checked{% endif %}>
+                <input type="checkbox" name="enabled" value="1" role="switch" aria-label="每日自动执行" {% if card.schedule.enabled %}checked{% endif %}>
                 <span>每日自动执行</span>
             </label>
             <label class="admin-execution-schedule-time">

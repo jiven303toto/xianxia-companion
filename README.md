@@ -95,7 +95,9 @@ http://127.0.0.1:8787/health
 
 确认返回 `status=ok`。如果 `telegram_code_current=false`，重启 Telegram runtime。
 
-## 6. 🔄 更新部署
+## 6. 🔄 更新已部署实例
+
+以下命令在已经完成初始化的部署机器上执行：
 
 Windows：
 

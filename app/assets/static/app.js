@@ -14,6 +14,7 @@ const jadeLoadingAssetUrls = [
 let jadeLoadingAssetsPromise = null;
 let jadeLoadingAssetsReady = false;
 const globalLoadingMinimumFrameMs = 220;
+const profileRefreshLoadingHoldMs = 1200;
 const profileSwitchRefreshStorageKey = 'profile-switch-refresh-needed';
 
 function decodeImageElement(image) {
@@ -134,12 +135,40 @@ function consumeProfileSwitchRefreshNeeded() {
     }
 }
 
-async function showGlobalLoading(overlay, message, messageText) {
+function primeProfileRefreshLoading(
+    overlay = document.getElementById('global-loading-overlay'),
+    message = document.getElementById('global-loading-message'),
+) {
+    if (window.location.pathname !== '/profile') return false;
+    try {
+        if (window.sessionStorage.getItem(profileSwitchRefreshStorageKey) !== '1') {
+            return false;
+        }
+    } catch (_error) {
+        return false;
+    }
+    if (message) {
+        message.textContent = '正在刷新当前元神';
+    }
+    if (overlay) {
+        overlay.hidden = false;
+    }
+    document.documentElement.dataset.profileRefreshLoading = '1';
+    document.body.classList.add('is-global-loading');
+    document.documentElement.setAttribute('aria-busy', 'true');
+    return true;
+}
+
+async function showGlobalLoading(overlay, message, messageText, options = {}) {
     if (message) {
         message.textContent = messageText || '正在处理';
     }
     const ready = await prepareGlobalLoading();
-    if (!ready && document.documentElement.dataset.theme === 'jade') {
+    if (
+        !ready &&
+        document.documentElement.dataset.theme === 'jade' &&
+        !options.allowUnready
+    ) {
         return false;
     }
     if (overlay) {
@@ -207,22 +236,33 @@ function mountGlobalLoadingForms() {
 
     const resetLoadingState = () => {
         loadingActive = false;
+        delete document.documentElement.dataset.profileRefreshLoading;
         hideGlobalLoading(overlay);
     };
 
     window.addEventListener('pageshow', (event) => {
-        resetLoadingState();
-        if (
-            event.persisted &&
-            window.location.pathname === '/profile' &&
-            consumeProfileSwitchRefreshNeeded()
-        ) {
-            window.location.reload();
+        if (!primeProfileRefreshLoading(overlay, message)) {
+            resetLoadingState();
             return;
         }
-        if (!event.persisted && window.location.pathname === '/profile') {
-            consumeProfileSwitchRefreshNeeded();
-        }
+        consumeProfileSwitchRefreshNeeded();
+        loadingActive = true;
+        showGlobalLoading(
+            overlay,
+            message,
+            '正在刷新当前元神',
+            { allowUnready: true },
+        )
+            .then(async () => {
+                await new Promise((resolve) => {
+                    window.setTimeout(resolve, profileRefreshLoadingHoldMs);
+                });
+                if (event.persisted) {
+                    window.location.reload();
+                    return;
+                }
+                resetLoadingState();
+            });
     });
 
     document.addEventListener('submit', (event) => {
@@ -351,10 +391,15 @@ function mountNavigationTransitions() {
 
     const reset = () => {
         navigating = false;
-        overlay?.setAttribute('hidden', '');
+        const preserveProfileRefreshLoading =
+            document.documentElement.dataset.profileRefreshLoading === '1';
+        if (!preserveProfileRefreshLoading) {
+            overlay?.setAttribute('hidden', '');
+            document.body.classList.remove('is-global-loading');
+            document.documentElement.removeAttribute('aria-busy');
+        }
         content.classList.remove('is-route-exiting', 'is-route-loading');
-        document.body.classList.remove('is-route-navigating', 'is-global-loading');
-        document.documentElement.removeAttribute('aria-busy');
+        document.body.classList.remove('is-route-navigating');
         currentNavLink = findCurrentNavLink() ||
             navLinks.find((link) => link.classList.contains('active')) ||
             currentNavLink;
@@ -1241,6 +1286,7 @@ function mountAdminGlobalExecution() {
     }
 }
 
+primeProfileRefreshLoading();
 warmHealthCheck();
 warmJadeLoadingAssets();
 mountCountdowns();

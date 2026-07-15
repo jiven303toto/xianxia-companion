@@ -127,6 +127,8 @@ python3 tools/setup_environment.py --check --strict
 
 本项目基于 [MIT License](LICENSE) 开源。
 
+---
+
 **🤝 致谢与社区**
 
 本项目永远感谢 [LINUX DO](https://linux.do/) 社区的支持与推广。

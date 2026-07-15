@@ -5901,6 +5901,22 @@ p.muted {
     display: none;
 }
 
+:root[data-theme="jade"] .profile-artifact-value .profile-artifact-item[data-artifact-tier="1"] {
+    color: #9b6415;
+}
+
+:root[data-theme="jade"] .profile-artifact-value .profile-artifact-item[data-artifact-tier="2"] {
+    color: var(--jade-lavender);
+}
+
+:root[data-theme="jade"] .profile-artifact-value .profile-artifact-item[data-artifact-tier="3"] {
+    color: #1d6aa8;
+}
+
+:root[data-theme="jade"] .profile-artifact-value .profile-artifact-item[data-artifact-tier="4"] {
+    color: #0f7155;
+}
+
 @media (max-width: 1024px) {
     .detail-grid.three-column-grid {
         grid-template-columns: repeat(2, 1fr);

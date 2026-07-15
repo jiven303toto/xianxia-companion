@@ -341,7 +341,11 @@ function mountNavigationTransitions() {
         url.pathname === window.location.pathname &&
         url.search === window.location.search
     );
-    let currentNavLink = navLinks.find((link) => isCurrentRoute(new URL(link.href, window.location.href))) ||
+    const findCurrentNavLink = () => navLinks.find((link) => {
+        const url = new URL(link.href, window.location.href);
+        return url.origin === window.location.origin && url.pathname === window.location.pathname;
+    }) || null;
+    let currentNavLink = findCurrentNavLink() ||
         navLinks.find((link) => link.classList.contains('active')) ||
         null;
 
@@ -351,12 +355,13 @@ function mountNavigationTransitions() {
         content.classList.remove('is-route-exiting', 'is-route-loading');
         document.body.classList.remove('is-route-navigating', 'is-global-loading');
         document.documentElement.removeAttribute('aria-busy');
-        currentNavLink = navLinks.find((link) => isCurrentRoute(new URL(link.href, window.location.href))) ||
+        currentNavLink = findCurrentNavLink() ||
             navLinks.find((link) => link.classList.contains('active')) ||
             currentNavLink;
         navLinks.forEach((link) => {
-            link.classList.remove('is-route-pending');
+            link.classList.remove('active', 'is-route-pending');
             if (link === currentNavLink) {
+                link.classList.add('active');
                 link.setAttribute('aria-current', 'page');
             } else {
                 link.removeAttribute('aria-current');

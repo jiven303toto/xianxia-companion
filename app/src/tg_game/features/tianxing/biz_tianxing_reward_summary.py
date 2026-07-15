@@ -10,6 +10,22 @@ from .biz_tianxing_rewards import (
 )
 from .biz_tianxing_runtime import ensure_schema
 
+TIANXING_REWARD_AUDIT_FILTER = """
+AND (
+  route='探索' OR action='探索' OR
+  raw_text LIKE '%野外历练%' OR command_text LIKE '%野外历练%' OR
+  raw_text LIKE '%探寻成功%' OR command_text LIKE '%探寻成功%' OR
+  raw_text LIKE '%裂缝%' OR command_text LIKE '%裂缝%'
+)
+AND (
+  result IN ('prediction_hit', 'prediction_miss', 'change_triggered') OR
+  detail_json LIKE '%"result":"prediction_hit"%' OR
+  detail_json LIKE '%"result":"prediction_miss"%' OR
+  detail_json LIKE '%"result":"change_triggered"%'
+)
+"""
+
+
 def normalize_tianxing_day_key(value: str = "", now=None) -> str:
     current_time = float(time.time() if now is None else now)
     raw = str(value or "").strip().replace("/", "-")
@@ -56,12 +72,12 @@ def build_tianxing_reward_marker_days(
     day_keys: set[str] = set()
     with storage.connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT *
             FROM tianxing_audit_events
             WHERE profile_id=? AND created_at>=?
+            {TIANXING_REWARD_AUDIT_FILTER}
             ORDER BY created_at DESC, id DESC
-            LIMIT 3000
             """,
             (int(profile_id), float(cutoff_ts)),
         ).fetchall()
@@ -161,10 +177,11 @@ def build_tianxing_today_exploration_rewards(
     username = str(getattr(profile, "telegram_username", "") or "").strip()
     with storage.connect() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT *
             FROM tianxing_audit_events
             WHERE profile_id=? AND created_at>=? AND created_at<?
+            {TIANXING_REWARD_AUDIT_FILTER}
             ORDER BY created_at DESC, id DESC
             LIMIT 300
             """,

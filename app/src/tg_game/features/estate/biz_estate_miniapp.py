@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import re
 import time
 from typing import Optional
@@ -15,6 +16,7 @@ from .biz_estate_constants import (
     ESTATE_MINIAPP_DEFAULT_API_BASE_URL,
     ESTATE_MINIAPP_DEFAULT_BOT_USERNAME,
     ESTATE_MINIAPP_ENDPOINTS,
+    ESTATE_MINIAPP_FALLBACK_START_PARAM_ENV,
     ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL,
     ESTATE_MINIAPP_PUBLIC_ENTRY_STATE_KEY,
     ESTATE_MINIAPP_WEB_PATH,
@@ -25,8 +27,10 @@ from .biz_estate_hunt_queue import (
     _choose_hunt_reveal_index,
     _extract_hunt_limits_state,
     build_estate_miniapp_hunt_request,
+    claim_estate_miniapp_hunt_request,
     continue_estate_miniapp_hunt_automation,
     get_pending_estate_miniapp_hunt_request,
+    is_estate_miniapp_hunt_request_owned,
     is_estate_miniapp_hunt_limit_reached,
     is_estate_miniapp_hunt_state_stale,
     mark_estate_miniapp_hunt_limit_reached,
@@ -404,6 +408,24 @@ def _extract_public_estate_launch(message: object) -> dict:
     return launch
 
 
+def _configured_estate_public_miniapp_launch() -> dict:
+    token = os.getenv(ESTATE_MINIAPP_FALLBACK_START_PARAM_ENV, "").strip()
+    if not token:
+        return {}
+    if not token.lower().startswith("df_") or not _ESTATE_TOKEN_PATTERN.fullmatch(token):
+        raise ValueError("配置的洞府 fallback start param 无效")
+    webview_url = (
+        f"https://t.me/{ESTATE_MINIAPP_DEFAULT_BOT_USERNAME}"
+        f"?startapp={quote(token, safe='')}"
+    )
+    return {
+        "token": token,
+        "webview_url": webview_url,
+        "bot_username": ESTATE_MINIAPP_DEFAULT_BOT_USERNAME,
+        "entry": _summarize_url("进入洞府", webview_url) or {},
+    }
+
+
 def _estate_public_entry_chat_id(client: object, storage: object = None) -> int:
     profile_id = _int_or_zero(getattr(client, "_tg_game_profile_id", 0))
     if profile_id and storage is not None and hasattr(storage, "list_chat_bindings"):
@@ -558,11 +580,35 @@ async def resolve_estate_public_miniapp_launch(
     async with _ESTATE_PUBLIC_ENTRY_DISCOVERY_LOCK:
         state = load_estate_public_entry_discovery_state(storage)
         try:
-            return await discover_estate_public_miniapp_launch(
+            result = await discover_estate_public_miniapp_launch(
                 client,
                 storage=storage,
                 now=current_time,
             )
+            if result.get("ok"):
+                return result
+            state = (
+                result.get("state")
+                if isinstance(result.get("state"), dict)
+                else state
+            )
+            fallback_launch = _configured_estate_public_miniapp_launch()
+            if not fallback_launch:
+                return result
+            state = _updated_public_entry_state(
+                state,
+                message_id=0,
+                launch=fallback_launch,
+                source="configured_fallback",
+                now=current_time,
+            )
+            state = save_estate_public_entry_discovery_state(storage, state)
+            return {
+                "ok": True,
+                "launch": fallback_launch,
+                "state": state,
+                "error": "",
+            }
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -779,6 +825,16 @@ def execute_estate_miniapp_request(request: dict, transport) -> dict:
         }
 
 
+def _execute_hunt_reveal_with_retry(request: dict, transport) -> dict:
+    result = execute_estate_miniapp_request(request, transport)
+    if result.get("ok"):
+        return result
+    status_code = int(result.get("status_code") or 0)
+    if status_code == 0 or status_code >= 500:
+        return execute_estate_miniapp_request(request, transport)
+    return result
+
+
 def _unwrap_data(data: object) -> dict:
     if not isinstance(data, dict):
         return {}
@@ -968,7 +1024,7 @@ def run_estate_miniapp_hunt_flow(
             init_data=init_data,
             payload={"sessionId": session_id, "index": index},
         )
-        reveal_result = execute_estate_miniapp_request(reveal_request, transport)
+        reveal_result = _execute_hunt_reveal_with_retry(reveal_request, transport)
         _append_event(events, f"reveal:{index}", reveal_result)
         if not reveal_result.get("ok"):
             hunt = _build_hunt_state(

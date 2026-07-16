@@ -4,7 +4,7 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from tg_game.config import ALLOWED_GAME_BOT_IDS
 from tg_game.models import ChatBinding, FeatureModule, ModuleSetting, PlayerProfile
@@ -2846,6 +2846,40 @@ class Storage:
                 (profile_id, provider),
             ).fetchone()
         return dict(row) if row else None
+
+    def update_external_account_payload(
+        self,
+        profile_id: int,
+        provider: str,
+        transform: Callable[[dict], dict],
+    ) -> dict:
+        now = time.time()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT me_json FROM external_accounts WHERE profile_id=? AND provider=?",
+                (profile_id, provider),
+            ).fetchone()
+            if not row:
+                return {}
+            payload = _json_loads_object(row["me_json"])
+            updated_payload = transform(payload)
+            if not isinstance(updated_payload, dict):
+                raise ValueError("External account payload transform must return a dict")
+            conn.execute(
+                """
+                UPDATE external_accounts
+                SET me_json=?, updated_at=?
+                WHERE profile_id=? AND provider=?
+                """,
+                (
+                    json.dumps(updated_payload, ensure_ascii=False),
+                    now,
+                    profile_id,
+                    provider,
+                ),
+            )
+        return updated_payload
 
     def profile_has_companion(self, profile_id: int) -> bool:
         external_account = self.get_external_account(profile_id, ASC_EXTERNAL_PROVIDER)

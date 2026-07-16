@@ -52,6 +52,33 @@ _DEFAULT_HUNT_REVEAL_ORDER = (
     22,
 )
 
+ESTATE_MINIAPP_REQUEST_LEASE_SECONDS = 15 * 60
+ESTATE_MINIAPP_REQUEST_INTERRUPTED_ERROR = (
+    "执行进程已中断，未自动重试；请重新发起洞府寻宝。"
+)
+
+
+def _timestamp_or_zero(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _estate_miniapp_hunt_request_is_active(
+    request: object,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    source = _as_dict(request)
+    status = str(source.get("status") or "")
+    if status == "queued":
+        return True
+    if status not in {"resolving", "running"}:
+        return False
+    current_time = float(time.time() if now is None else now)
+    return _timestamp_or_zero(source.get("lease_expires_at")) > current_time
+
 
 def _estate_miniapp_day_key(value: object = None) -> str:
     if value is None:
@@ -247,6 +274,10 @@ def queue_estate_miniapp_hunt_request(
         dongfu = {}
     else:
         dongfu = dict(dongfu)
+    if _estate_miniapp_hunt_request_is_active(
+        dongfu.get("miniapp_hunt_request"),
+    ):
+        return result
     dongfu.pop("miniapp_launch", None)
     request = build_estate_miniapp_hunt_request(
         max_reveals=max_reveals,
@@ -281,7 +312,22 @@ def get_pending_estate_miniapp_hunt_request(payload: object) -> dict:
     return request if request.get("status") in {"queued", "resolving", "running"} else {}
 
 
-def mark_estate_miniapp_hunt_request_status(payload: object, status: str) -> dict:
+def is_estate_miniapp_hunt_request_owned(payload: object, execution_owner: str) -> bool:
+    request = get_pending_estate_miniapp_hunt_request(payload)
+    return bool(
+        request
+        and str(request.get("execution_owner") or "") == str(execution_owner or "")
+    )
+
+
+def mark_estate_miniapp_hunt_request_status(
+    payload: object,
+    status: str,
+    *,
+    execution_owner: str = "",
+    now: Optional[float] = None,
+    lease_seconds: int = ESTATE_MINIAPP_REQUEST_LEASE_SECONDS,
+) -> dict:
     if status not in {"resolving", "running"}:
         raise ValueError("Unsupported estate MiniApp request status")
     result = deepcopy(payload if isinstance(payload, dict) else {})
@@ -289,16 +335,73 @@ def mark_estate_miniapp_hunt_request_status(payload: object, status: str) -> dic
     request = dict(dongfu.get("miniapp_hunt_request") or {})
     if not request:
         return result
-    now = time.time()
+    if execution_owner and str(request.get("execution_owner") or "") != execution_owner:
+        return result
+    current_time = float(time.time() if now is None else now)
     request["status"] = status
-    request["started_at"] = request.get("started_at") or now
+    request["started_at"] = request.get("started_at") or current_time
+    if execution_owner:
+        request["execution_owner"] = execution_owner
+        request["lease_expires_at"] = current_time + max(1, int(lease_seconds))
     hunt = dict(dongfu.get("miniapp_hunt") or {})
     hunt.update(
         {
             "status": status,
-            "updated_at": now,
+            "updated_at": current_time,
             "automation_status": "正在获取入口" if status == "resolving" else "正在寻宝",
             "error": "",
+        }
+    )
+    dongfu["miniapp_hunt_request"] = request
+    dongfu["miniapp_hunt"] = hunt
+    result["dongfu"] = dongfu
+    return result
+
+
+def claim_estate_miniapp_hunt_request(
+    payload: object,
+    execution_owner: str,
+    *,
+    now: Optional[float] = None,
+    lease_seconds: int = ESTATE_MINIAPP_REQUEST_LEASE_SECONDS,
+) -> dict:
+    result = deepcopy(payload if isinstance(payload, dict) else {})
+    dongfu = dict(result.get("dongfu") or {})
+    request = dict(dongfu.get("miniapp_hunt_request") or {})
+    status = str(request.get("status") or "")
+    if not request or status not in {"queued", "resolving", "running"}:
+        return result
+    current_time = float(time.time() if now is None else now)
+    current_owner = str(request.get("execution_owner") or "")
+    if status == "queued" or current_owner == execution_owner:
+        request["execution_owner"] = execution_owner
+        request["claimed_at"] = request.get("claimed_at") or current_time
+        dongfu["miniapp_hunt_request"] = request
+        result["dongfu"] = dongfu
+        return mark_estate_miniapp_hunt_request_status(
+            result,
+            "resolving",
+            execution_owner=execution_owner,
+            now=current_time,
+            lease_seconds=lease_seconds,
+        )
+    if _estate_miniapp_hunt_request_is_active(request, now=current_time):
+        return result
+    request.update(
+        {
+            "status": "interrupted",
+            "interrupted_at": current_time,
+            "lease_expires_at": current_time,
+            "error": ESTATE_MINIAPP_REQUEST_INTERRUPTED_ERROR,
+        }
+    )
+    hunt = dict(dongfu.get("miniapp_hunt") or {})
+    hunt.update(
+        {
+            "status": "failed",
+            "updated_at": current_time,
+            "automation_status": "执行中断",
+            "error": ESTATE_MINIAPP_REQUEST_INTERRUPTED_ERROR,
         }
     )
     dongfu["miniapp_hunt_request"] = request
@@ -352,7 +455,10 @@ def continue_estate_miniapp_hunt_automation(
     previous_runs = _int_or_zero(request_data.get("runs_completed"))
     was_settled = str(hunt_data.get("status") or "") == "settled"
     runs_completed = previous_runs + (1 if was_settled else 0)
-    total_loot = _merge_hunt_loot(request_data.get("total_loot"), hunt_data.get("loot"))
+    total_loot = _merge_hunt_loot(
+        request_data.get("total_loot"),
+        hunt_data.get("loot") if was_settled else None,
+    )
     total_contribution = _int_or_zero(request_data.get("total_contribution"))
     if was_settled:
         total_contribution += _int_or_zero(hunt_data.get("contribution"))

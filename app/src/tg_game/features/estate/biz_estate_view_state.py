@@ -172,9 +172,13 @@ def _build_hunt_round_summary(hunt: object, *, round_number: int) -> dict:
     chance_text = _hunt_chance_text(used, limit, remaining)
     if chance_text == "-":
         chance_text = _miniapp_safe_text(hunt_data.get("chance_text") or "-", 80)
-    loot = _normalize_hunt_loot(hunt_data.get("loot"))
+    loot = (
+        _normalize_hunt_loot(hunt_data.get("loot"))
+        if status == "settled"
+        else []
+    )
     loot_text = _hunt_loot_text(loot)
-    if not loot:
+    if status == "settled" and not loot:
         loot_text = _miniapp_safe_text(hunt_data.get("loot_text") or "-", 160)
     failure_step = _hunt_failure_step(hunt_data.get("events"))
     if failure_step == "-":
@@ -463,13 +467,43 @@ def build_estate_miniapp_hunt(value: object) -> dict:
     ap = _int_or_zero(raw.get("ap_value") if "ap_value" in raw else raw.get("ap"))
     max_ap = _int_or_zero(raw.get("max_ap"))
     ap_text = _hunt_ap_text(ap, max_ap)
-    loot = _normalize_hunt_loot(raw.get("loot"))
-    total_loot = _merge_hunt_loot(raw.get("automation_total_loot"))
     rounds = _normalize_hunt_rounds(raw.get("rounds"))
+    last_round_settled = bool(rounds and rounds[-1].get("status") == "settled")
+    loot = (
+        _normalize_hunt_loot(raw.get("loot"))
+        if status != "failed" and (not rounds or last_round_settled)
+        else []
+    )
+    total_loot = (
+        _merge_hunt_loot(
+            *(
+                round_data.get("loot")
+                for round_data in rounds
+                if round_data.get("status") == "settled"
+            )
+        )
+        if rounds
+        else _merge_hunt_loot(raw.get("automation_total_loot"))
+    )
     total_loot_text = (
         _hunt_loot_text(total_loot)
         if total_loot
-        else _miniapp_safe_text(raw.get("automation_total_loot_text") or "-", 160)
+        else (
+            "-"
+            if rounds
+            else _miniapp_safe_text(
+                raw.get("automation_total_loot_text") or "-", 160
+            )
+        )
+    )
+    loot_text = (
+        _hunt_loot_text(loot)
+        if loot
+        else (
+            "-"
+            if rounds or status == "failed"
+            else _miniapp_safe_text(raw.get("loot_text") or "-", 160)
+        )
     )
     legacy_rounds = []
     if not rounds and status not in {"not_requested", "queued"}:
@@ -530,9 +564,7 @@ def build_estate_miniapp_hunt(value: object) -> dict:
             "limit": limit,
             "chance_text": chance_text,
             "loot": loot,
-            "loot_text": _hunt_loot_text(loot)
-            if loot
-            else _miniapp_safe_text(raw.get("loot_text") or "-", 160),
+            "loot_text": loot_text,
             "latest_hint": _miniapp_safe_text(raw.get("latest_hint") or "-", 160),
             "logs": _hunt_logs(raw.get("logs")),
             "error": _sanitize_estate_miniapp_secret_text(raw.get("error") or ""),

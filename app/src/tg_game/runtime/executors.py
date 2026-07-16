@@ -7,7 +7,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 import biz_artifact_game
 import biz_basic_game
 import biz_battle_game
@@ -539,35 +539,54 @@ def _save_estate_daily_payload(
     )
 
 
+def _update_external_payload(
+    storage: Storage,
+    profile_id: int,
+    transform: Callable[[dict], dict],
+) -> dict:
+    return storage.update_external_account_payload(
+        int(profile_id),
+        ASC_PROVIDER,
+        transform,
+    )
+
+
 async def _run_pending_estate_public_hunt(
     client: object,
     storage: Storage,
     profile_id: int,
     payload: Optional[dict] = None,
 ) -> bool:
-    current_payload = (
-        payload
-        if isinstance(payload, dict)
-        else read_cached_external_payload(storage, int(profile_id))
+    _ = payload
+    execution_owner = secrets.token_hex(16)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: estate_miniapp.claim_estate_miniapp_hunt_request(
+            latest,
+            execution_owner,
+        ),
     )
+    if not estate_miniapp.is_estate_miniapp_hunt_request_owned(
+        current_payload,
+        execution_owner,
+    ):
+        return False
     hunt_request = estate_miniapp.get_pending_estate_miniapp_hunt_request(
         current_payload
     )
-    if not hunt_request:
-        return False
-    current_payload = estate_miniapp.mark_estate_miniapp_hunt_request_status(
-        current_payload,
-        "resolving",
-    )
-    _save_estate_daily_payload(storage, int(profile_id), current_payload)
 
     def mark_running() -> None:
         nonlocal current_payload
-        current_payload = estate_miniapp.mark_estate_miniapp_hunt_request_status(
-            current_payload,
-            "running",
+        current_payload = _update_external_payload(
+            storage,
+            int(profile_id),
+            lambda latest: estate_miniapp.mark_estate_miniapp_hunt_request_status(
+                latest,
+                "running",
+                execution_owner=execution_owner,
+            ),
         )
-        _save_estate_daily_payload(storage, int(profile_id), current_payload)
 
     result = await estate_miniapp.run_estate_public_miniapp_production_hunt_flow(
         client,
@@ -587,13 +606,25 @@ async def _run_pending_estate_public_hunt(
         )
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
     hunt = result.get("hunt") if isinstance(result.get("hunt"), dict) else None
-    updated_payload = estate_miniapp.merge_estate_miniapp_payload(
-        current_payload,
-        entry=result.get("entry") if isinstance(result.get("entry"), dict) else None,
-        snapshot=snapshot,
-        hunt=hunt,
+    _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: estate_miniapp.merge_estate_miniapp_payload(
+            latest,
+            entry=(
+                result.get("entry")
+                if isinstance(result.get("entry"), dict)
+                else None
+            ),
+            snapshot=snapshot,
+            hunt=hunt,
+        )
+        if estate_miniapp.is_estate_miniapp_hunt_request_owned(
+            latest,
+            execution_owner,
+        )
+        else latest,
     )
-    _save_estate_daily_payload(storage, int(profile_id), updated_payload)
     return True
 
 
@@ -895,27 +926,36 @@ async def _run_pending_tianji_public_trial(
     profile_id: int,
     payload: Optional[dict] = None,
 ) -> bool:
-    current_payload = (
-        payload
-        if isinstance(payload, dict)
-        else read_cached_external_payload(storage, int(profile_id))
+    _ = payload
+    execution_owner = secrets.token_hex(16)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: tianji_trial_miniapp.claim_tianji_trial_request(
+            latest,
+            execution_owner,
+        ),
     )
-    request = tianji_trial_miniapp.get_pending_tianji_trial_request(current_payload)
-    if not request:
-        return False
-    current_payload = tianji_trial_miniapp.mark_tianji_trial_request_status(
+    if not tianji_trial_miniapp.is_tianji_trial_request_owned(
         current_payload,
-        "resolving",
+        execution_owner,
+    ):
+        return False
+    request = tianji_trial_miniapp.get_pending_tianji_trial_request(
+        current_payload
     )
-    _save_tianji_trial_daily_payload(storage, int(profile_id), current_payload)
 
     def mark_running() -> None:
         nonlocal current_payload
-        current_payload = tianji_trial_miniapp.mark_tianji_trial_request_status(
-            current_payload,
-            "running",
+        current_payload = _update_external_payload(
+            storage,
+            int(profile_id),
+            lambda latest: tianji_trial_miniapp.mark_tianji_trial_request_status(
+                latest,
+                "running",
+                execution_owner=execution_owner,
+            ),
         )
-        _save_tianji_trial_daily_payload(storage, int(profile_id), current_payload)
 
     captures: list[dict] = []
     target_runs = tianji_trial_miniapp._miniapp_int(
@@ -944,13 +984,25 @@ async def _run_pending_tianji_public_trial(
         captures=captures,
         previous_rounds=request.get("rounds"),
     )
-    updated_payload = tianji_trial_miniapp.merge_tianji_trial_payload(
-        current_payload,
-        entry=result.get("entry") if isinstance(result.get("entry"), dict) else None,
-        run=run,
-        clear_request=True,
+    _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: tianji_trial_miniapp.merge_tianji_trial_payload(
+            latest,
+            entry=(
+                result.get("entry")
+                if isinstance(result.get("entry"), dict)
+                else None
+            ),
+            run=run,
+            clear_request=True,
+        )
+        if tianji_trial_miniapp.is_tianji_trial_request_owned(
+            latest,
+            execution_owner,
+        )
+        else latest,
     )
-    _save_tianji_trial_daily_payload(storage, int(profile_id), updated_payload)
     return True
 
 
@@ -1010,6 +1062,32 @@ async def _maybe_handle_estate_miniapp_snapshot(
         payload = {}
     hunt_request = estate_miniapp.get_pending_estate_miniapp_hunt_request(payload)
     if hunt_request:
+        execution_owner = secrets.token_hex(16)
+        claimed_payload = _update_external_payload(
+            storage,
+            context.profile.id,
+            lambda latest: estate_miniapp.claim_estate_miniapp_hunt_request(
+                latest,
+                execution_owner,
+            ),
+        )
+        if not estate_miniapp.is_estate_miniapp_hunt_request_owned(
+            claimed_payload,
+            execution_owner,
+        ):
+            return True
+        hunt_request = estate_miniapp.get_pending_estate_miniapp_hunt_request(
+            claimed_payload
+        )
+        _update_external_payload(
+            storage,
+            context.profile.id,
+            lambda latest: estate_miniapp.mark_estate_miniapp_hunt_request_status(
+                latest,
+                "running",
+                execution_owner=execution_owner,
+            ),
+        )
         result = await estate_miniapp.run_estate_miniapp_production_hunt_flow(
             context.client,
             token=launch.get("token"),
@@ -1026,12 +1104,20 @@ async def _maybe_handle_estate_miniapp_snapshot(
                 "Estate MiniApp hunt failed: %s",
                 estate_miniapp.sanitize_estate_miniapp_secret_text(result.get("error")),
             )
-        _record_estate_miniapp_payload(
-            context,
+        _update_external_payload(
             storage,
-            entry=launch.get("entry"),
-            snapshot=snapshot if isinstance(snapshot, dict) else None,
-            hunt=hunt if isinstance(hunt, dict) else None,
+            context.profile.id,
+            lambda latest: estate_miniapp.merge_estate_miniapp_payload(
+                latest,
+                entry=launch.get("entry"),
+                snapshot=snapshot if isinstance(snapshot, dict) else None,
+                hunt=hunt if isinstance(hunt, dict) else None,
+            )
+            if estate_miniapp.is_estate_miniapp_hunt_request_owned(
+                latest,
+                execution_owner,
+            )
+            else latest,
         )
         return True
 
@@ -1428,37 +1514,11 @@ def _load_tianji_trial_payload(context: EventContext, storage: Storage) -> tuple
     return external_account, payload
 
 
-def _save_tianji_trial_payload(
-    context: EventContext,
-    storage: Storage,
-    external_account: dict,
-    payload: dict,
-) -> None:
-    storage.upsert_external_account(
-        context.profile.id,
-        ASC_PROVIDER,
-        str(
-            external_account.get("telegram_user_id")
-            or context.profile.telegram_user_id
-            or ""
-        ),
-        str(
-            external_account.get("telegram_username")
-            or context.profile.telegram_username
-            or ""
-        ),
-        str(external_account.get("status") or "connected"),
-        str(external_account.get("cookie_text") or ""),
-        payload,
-        str(external_account.get("api_token") or ""),
-    )
-
-
 async def _maybe_handle_tianji_trial_miniapp_entry(
     context: EventContext,
     storage: Storage,
 ) -> bool:
-    external_account, payload = _load_tianji_trial_payload(context, storage)
+    _external_account, payload = _load_tianji_trial_payload(context, storage)
     pending_request = tianji_trial_miniapp.get_pending_tianji_trial_request(payload)
     if not _trusted_tianji_trial_parent(
         context,
@@ -1478,17 +1538,39 @@ async def _maybe_handle_tianji_trial_miniapp_entry(
             context.text
         ):
             return False
+        execution_owner = secrets.token_hex(16)
+        claimed_payload = _update_external_payload(
+            storage,
+            context.profile.id,
+            lambda latest: tianji_trial_miniapp.claim_tianji_trial_request(
+                latest,
+                execution_owner,
+            ),
+        )
+        if not tianji_trial_miniapp.is_tianji_trial_request_owned(
+            claimed_payload,
+            execution_owner,
+        ):
+            return True
         run = tianji_trial_miniapp.build_tianji_trial_run(
             {"ok": False, "status": "failed", "error": "MiniApp 入口按钮未捕获"},
             captures=[],
             error="MiniApp 入口按钮未捕获，未发起 HTTP。",
         )
-        updated_payload = tianji_trial_miniapp.merge_tianji_trial_payload(
-            payload,
-            run=run,
-            clear_request=True,
+        _update_external_payload(
+            storage,
+            context.profile.id,
+            lambda latest: tianji_trial_miniapp.merge_tianji_trial_payload(
+                latest,
+                run=run,
+                clear_request=True,
+            )
+            if tianji_trial_miniapp.is_tianji_trial_request_owned(
+                latest,
+                execution_owner,
+            )
+            else latest,
         )
-        _save_tianji_trial_payload(context, storage, external_account, updated_payload)
         return True
 
     entry = launch.get("entry") or tianji_trial_miniapp.extract_tianji_trial_miniapp_entry(
@@ -1496,13 +1578,42 @@ async def _maybe_handle_tianji_trial_miniapp_entry(
         context.text,
     )
     if not pending_request:
-        updated_payload = tianji_trial_miniapp.merge_tianji_trial_payload(
-            payload,
-            entry=entry,
+        _update_external_payload(
+            storage,
+            context.profile.id,
+            lambda latest: tianji_trial_miniapp.merge_tianji_trial_payload(
+                latest,
+                entry=entry,
+            ),
         )
-        _save_tianji_trial_payload(context, storage, external_account, updated_payload)
         return False
 
+    execution_owner = secrets.token_hex(16)
+    claimed_payload = _update_external_payload(
+        storage,
+        context.profile.id,
+        lambda latest: tianji_trial_miniapp.claim_tianji_trial_request(
+            latest,
+            execution_owner,
+        ),
+    )
+    if not tianji_trial_miniapp.is_tianji_trial_request_owned(
+        claimed_payload,
+        execution_owner,
+    ):
+        return True
+    pending_request = tianji_trial_miniapp.get_pending_tianji_trial_request(
+        claimed_payload
+    )
+    _update_external_payload(
+        storage,
+        context.profile.id,
+        lambda latest: tianji_trial_miniapp.mark_tianji_trial_request_status(
+            latest,
+            "running",
+            execution_owner=execution_owner,
+        ),
+    )
     captures: list[dict] = []
     result = await tianji_trial_miniapp.run_tianji_trial_miniapp_production_flow(
         context.client,
@@ -1526,13 +1637,21 @@ async def _maybe_handle_tianji_trial_miniapp_entry(
         captures=captures,
         previous_rounds=pending_request.get("rounds"),
     )
-    updated_payload = tianji_trial_miniapp.merge_tianji_trial_payload(
-        payload,
-        entry=entry,
-        run=run,
-        clear_request=True,
+    _update_external_payload(
+        storage,
+        context.profile.id,
+        lambda latest: tianji_trial_miniapp.merge_tianji_trial_payload(
+            latest,
+            entry=entry,
+            run=run,
+            clear_request=True,
+        )
+        if tianji_trial_miniapp.is_tianji_trial_request_owned(
+            latest,
+            execution_owner,
+        )
+        else latest,
     )
-    _save_tianji_trial_payload(context, storage, external_account, updated_payload)
     return True
 
 
@@ -1633,38 +1752,29 @@ def _queue_tianji_trial_daily_request(
     chat_type: str,
     bot_username: str,
 ) -> None:
-    profile = storage.get_profile(int(profile_id))
-    external_account = storage.get_external_account(int(profile_id), ASC_PROVIDER) or {}
-    try:
-        payload = json.loads(external_account.get("me_json") or "{}")
-    except json.JSONDecodeError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    payload = tianji_trial_miniapp.queue_tianji_trial_request(
-        payload,
-        chat_id=int(chat_id),
-        thread_id=thread_id,
-        chat_type=chat_type,
-        bot_username=bot_username,
-    )
-    storage.upsert_external_account(
+    external_account = storage.get_external_account(int(profile_id), ASC_PROVIDER)
+    if not external_account:
+        profile = storage.get_profile(int(profile_id))
+        storage.upsert_external_account(
+            int(profile_id),
+            ASC_PROVIDER,
+            str(getattr(profile, "telegram_user_id", "") or ""),
+            str(getattr(profile, "telegram_username", "") or ""),
+            "connected",
+            "",
+            {},
+            "",
+        )
+    storage.update_external_account_payload(
         int(profile_id),
         ASC_PROVIDER,
-        str(
-            external_account.get("telegram_user_id")
-            or getattr(profile, "telegram_user_id", "")
-            or ""
+        lambda latest: tianji_trial_miniapp.queue_tianji_trial_request(
+            latest,
+            chat_id=int(chat_id),
+            thread_id=thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
         ),
-        str(
-            external_account.get("telegram_username")
-            or getattr(profile, "telegram_username", "")
-            or ""
-        ),
-        str(external_account.get("status") or "connected"),
-        str(external_account.get("cookie_text") or ""),
-        payload,
-        str(external_account.get("api_token") or ""),
     )
 
 
@@ -4487,21 +4597,31 @@ async def _run_companion_auto_scheduler(
                             last_error=biz_estate_hunt_daily_auto.SENT_TODAY_ERROR,
                         )
                         continue
-                    latest_payload = read_cached_external_payload(
+                    limit_reached = False
+
+                    def queue_estate_request(latest: dict) -> dict:
+                        nonlocal limit_reached
+                        if estate_miniapp.is_estate_miniapp_hunt_limit_reached(
+                            latest
+                        ):
+                            limit_reached = True
+                            return estate_miniapp.mark_estate_miniapp_hunt_limit_reached(
+                                latest
+                            )
+                        return estate_miniapp.queue_estate_miniapp_hunt_request(
+                            latest,
+                            chat_id=chat_id,
+                            thread_id=thread_id,
+                            chat_type=str(task.get("chat_type") or "group"),
+                            bot_username=str(task.get("bot_username") or ""),
+                        )
+
+                    _update_external_payload(
                         storage,
                         int(profile_id),
+                        queue_estate_request,
                     )
-                    if estate_miniapp.is_estate_miniapp_hunt_limit_reached(
-                        latest_payload
-                    ):
-                        updated_payload = estate_miniapp.mark_estate_miniapp_hunt_limit_reached(
-                            latest_payload
-                        )
-                        _save_estate_daily_payload(
-                            storage,
-                            int(profile_id),
-                            updated_payload,
-                        )
+                    if limit_reached:
                         storage.update_companion_auto_task(
                             task_id,
                             last_run_at=now,
@@ -4510,18 +4630,6 @@ async def _run_companion_auto_scheduler(
                             last_error=biz_estate_hunt_daily_auto.LIMIT_REACHED_ERROR,
                         )
                         continue
-                    result_payload = estate_miniapp.queue_estate_miniapp_hunt_request(
-                        latest_payload,
-                        chat_id=chat_id,
-                        thread_id=thread_id,
-                        chat_type=str(task.get("chat_type") or "group"),
-                        bot_username=str(task.get("bot_username") or ""),
-                    )
-                    _save_estate_daily_payload(
-                        storage,
-                        int(profile_id),
-                        result_payload,
-                    )
                     storage.update_companion_auto_task(
                         task_id,
                         last_run_at=now,

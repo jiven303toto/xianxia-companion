@@ -3269,37 +3269,16 @@ def create_app() -> FastAPI:
         resolved_chat_id = int(normalized_chat_id)
         resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
 
-        external_account = storage.get_external_account(profile.id, ASC_PROVIDER) or {}
-        try:
-            payload = json.loads(external_account.get("me_json") or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        payload = queue_tianji_trial_request(
-            payload,
-            chat_id=resolved_chat_id,
-            thread_id=resolved_thread_id,
-            chat_type=chat_type,
-            bot_username=bot_username,
-        )
-        storage.upsert_external_account(
+        storage.update_external_account_payload(
             profile.id,
             ASC_PROVIDER,
-            str(
-                external_account.get("telegram_user_id")
-                or profile.telegram_user_id
-                or ""
+            lambda latest: queue_tianji_trial_request(
+                latest,
+                chat_id=resolved_chat_id,
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
             ),
-            str(
-                external_account.get("telegram_username")
-                or profile.telegram_username
-                or ""
-            ),
-            str(external_account.get("status") or "connected"),
-            str(external_account.get("cookie_text") or ""),
-            payload,
-            str(external_account.get("api_token") or ""),
         )
         return RedirectResponse(url=redirect_to, status_code=303)
 
@@ -3487,59 +3466,21 @@ def create_app() -> FastAPI:
         resolved_chat_id = int(normalized_chat_id)
         resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
 
-        external_account = storage.get_external_account(profile.id, ASC_PROVIDER) or {}
-        try:
-            payload = json.loads(external_account.get("me_json") or "{}")
-        except json.JSONDecodeError:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        if is_estate_miniapp_hunt_limit_reached(payload):
-            payload = mark_estate_miniapp_hunt_limit_reached(payload)
-            storage.upsert_external_account(
-                profile.id,
-                ASC_PROVIDER,
-                str(
-                    external_account.get("telegram_user_id")
-                    or profile.telegram_user_id
-                    or ""
-                ),
-                str(
-                    external_account.get("telegram_username")
-                    or profile.telegram_username
-                    or ""
-                ),
-                str(external_account.get("status") or "connected"),
-                str(external_account.get("cookie_text") or ""),
-                payload,
-                str(external_account.get("api_token") or ""),
+        def queue_request(latest: dict) -> dict:
+            if is_estate_miniapp_hunt_limit_reached(latest):
+                return mark_estate_miniapp_hunt_limit_reached(latest)
+            return queue_estate_miniapp_hunt_request(
+                latest,
+                chat_id=resolved_chat_id,
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
             )
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        payload = queue_estate_miniapp_hunt_request(
-            payload,
-            chat_id=resolved_chat_id,
-            thread_id=resolved_thread_id,
-            chat_type=chat_type,
-            bot_username=bot_username,
-        )
-        storage.upsert_external_account(
+        storage.update_external_account_payload(
             profile.id,
             ASC_PROVIDER,
-            str(
-                external_account.get("telegram_user_id")
-                or profile.telegram_user_id
-                or ""
-            ),
-            str(
-                external_account.get("telegram_username")
-                or profile.telegram_username
-                or ""
-            ),
-            str(external_account.get("status") or "connected"),
-            str(external_account.get("cookie_text") or ""),
-            payload,
-            str(external_account.get("api_token") or ""),
+            queue_request,
         )
         return RedirectResponse(url=redirect_to, status_code=303)
 

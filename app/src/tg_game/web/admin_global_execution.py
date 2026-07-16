@@ -116,24 +116,6 @@ def _load_external(storage: Storage, profile_id: int) -> tuple[dict, dict]:
     return account, payload if isinstance(payload, dict) else {}
 
 
-def _save_external(
-    storage: Storage,
-    profile,
-    account: dict,
-    payload: dict,
-) -> None:
-    storage.upsert_external_account(
-        int(profile.id),
-        "asc_aiopenai",
-        str(account.get("telegram_user_id") or profile.telegram_user_id or ""),
-        str(account.get("telegram_username") or profile.telegram_username or ""),
-        str(account.get("status") or "connected"),
-        str(account.get("cookie_text") or ""),
-        payload,
-        str(account.get("api_token") or ""),
-    )
-
-
 def _profile_display_name(profile) -> str:
     name = str(getattr(profile, "name", "") or f"Profile {profile.id}")
     return re.sub(r"-\d+$", "", name) or f"Profile {profile.id}"
@@ -252,45 +234,61 @@ def _pagoda_succeeded_today(
 
 
 def _start_estate_item(storage: Storage, profile, item: dict) -> None:
-    account, payload = _load_external(storage, profile.id)
+    account, _payload = _load_external(storage, profile.id)
     if not _profile_ready(profile, account, item):
         item["status"] = "failed"
         return
-    if is_estate_miniapp_hunt_limit_reached(payload):
-        _save_external(
-            storage,
-            profile,
-            account,
-            mark_estate_miniapp_hunt_limit_reached(payload),
+    limit_reached = False
+
+    def queue_request(latest: dict) -> dict:
+        nonlocal limit_reached
+        if is_estate_miniapp_hunt_limit_reached(latest):
+            limit_reached = True
+            return mark_estate_miniapp_hunt_limit_reached(latest)
+        return queue_estate_miniapp_hunt_request(
+            latest,
+            chat_id=item["chat_id"],
+            thread_id=item["thread_id"],
+            chat_type=item["chat_type"],
+            bot_username=item["bot_username"],
         )
-        item["status"] = "skipped"
-        return
-    updated = queue_estate_miniapp_hunt_request(
-        payload,
-        chat_id=item["chat_id"],
-        thread_id=item["thread_id"],
-        chat_type=item["chat_type"],
-        bot_username=item["bot_username"],
+
+    storage.update_external_account_payload(
+        int(profile.id),
+        "asc_aiopenai",
+        queue_request,
     )
-    _save_external(storage, profile, account, updated)
+    if limit_reached:
+        item["status"] = "skipped"
 
 
 def _start_tianji_item(storage: Storage, profile, item: dict) -> None:
-    account, payload = _load_external(storage, profile.id)
+    account, _payload = _load_external(storage, profile.id)
     if not _profile_ready(profile, account, item):
         item["status"] = "failed"
         return
-    if _tianji_completed_today(payload):
-        item["status"] = "skipped"
-        return
-    updated = queue_tianji_trial_request(
-        payload,
-        chat_id=item["chat_id"],
-        thread_id=item["thread_id"],
-        chat_type=item["chat_type"],
-        bot_username=item["bot_username"],
+    completed_today = False
+
+    def queue_request(latest: dict) -> dict:
+        nonlocal completed_today
+        if _tianji_completed_today(latest):
+            completed_today = True
+            return latest
+        return queue_tianji_trial_request(
+            latest,
+            chat_id=item["chat_id"],
+            thread_id=item["thread_id"],
+            chat_type=item["chat_type"],
+            bot_username=item["bot_username"],
+        )
+
+    storage.update_external_account_payload(
+        int(profile.id),
+        "asc_aiopenai",
+        queue_request,
     )
-    _save_external(storage, profile, account, updated)
+    if completed_today:
+        item["status"] = "skipped"
 
 
 def _start_pagoda_item(

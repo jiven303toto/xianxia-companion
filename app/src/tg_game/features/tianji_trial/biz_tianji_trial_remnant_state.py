@@ -21,6 +21,24 @@ TIANJI_REMNANT_COMMANDS = [
     {"label": "兑换清单", "command": TIANJI_EXCHANGE_COMMAND_TEXT},
 ]
 TIANJI_EXCHANGE_FALLBACK_ITEMS = [
+    {
+        "name": "灵石",
+        "cost": "1",
+        "quantity_step": 10,
+        "label": "灵石（1 残痕 -> x10）",
+    },
+    {
+        "name": "凝血草",
+        "cost": "1",
+        "quantity_step": 1,
+        "label": "凝血草（1 残痕）",
+    },
+    {
+        "name": "一阶妖丹",
+        "cost": "1",
+        "quantity_step": 1,
+        "label": "一阶妖丹（1 残痕）",
+    },
 ]
 TIANJI_EXCHANGE_REFRESH_HINT = "先发送兑换清单刷新今日可兑换物品。"
 TIANJI_EXCHANGE_STALE_HINT = "兑换清单已过期，请重新发送兑换清单。"
@@ -108,7 +126,9 @@ def build_tianji_remnant_state(
             "commands": TIANJI_REMNANT_COMMANDS,
             "exchange_items": list(TIANJI_EXCHANGE_FALLBACK_ITEMS),
             "exchange_quantity_options": [],
-            "exchange_hint": TIANJI_EXCHANGE_REFRESH_HINT,
+            "exchange_hint": (
+                "" if TIANJI_EXCHANGE_FALLBACK_ITEMS else TIANJI_EXCHANGE_REFRESH_HINT
+            ),
             "exchange_time": "",
             "can_exchange": False,
             "panel_time": "",
@@ -165,7 +185,9 @@ def build_tianji_remnant_state(
         )
         if exchange_ts and tianji_remnant_day_key(exchange_ts) != tianji_remnant_day_key():
             exchange_items = []
-            state["exchange_hint"] = TIANJI_EXCHANGE_STALE_HINT
+            state["exchange_hint"] = (
+                "" if TIANJI_EXCHANGE_FALLBACK_ITEMS else TIANJI_EXCHANGE_STALE_HINT
+            )
         else:
             if exchange_ts:
                 state["exchange_time"] = format_timestamp(exchange_ts)

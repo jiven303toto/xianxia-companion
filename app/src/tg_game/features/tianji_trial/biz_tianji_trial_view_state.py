@@ -3,6 +3,13 @@ import time
 from copy import deepcopy
 from typing import Optional
 
+
+TIANJI_TRIAL_REQUEST_LEASE_SECONDS = 15 * 60
+TIANJI_TRIAL_REQUEST_INTERRUPTED_ERROR = (
+    "执行进程已中断，未自动重试；请重新发起天机试炼。"
+)
+
+
 def _now_text(value: object = None) -> str:
     try:
         ts = float(value if value is not None else time.time())
@@ -48,6 +55,28 @@ def _is_stale_tianji_trial_request(request: object) -> bool:
     return bool(request_day and request_day != _current_day_key())
 
 
+def _timestamp_or_zero(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _tianji_trial_request_is_active(
+    request: object,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    source = request if isinstance(request, dict) else {}
+    status = str(source.get("status") or "")
+    if status == "queued":
+        return not _is_stale_tianji_trial_request(source)
+    if status not in {"resolving", "running"}:
+        return False
+    current_time = float(time.time() if now is None else now)
+    return _timestamp_or_zero(source.get("lease_expires_at")) > current_time
+
+
 def _miniapp_int(value: object, default: int = 0) -> int:
     try:
         return int(value if value is not None else default)
@@ -78,6 +107,8 @@ def queue_tianji_trial_request(
     from .biz_tianji_trial_miniapp import TIANJI_TRIAL_MINIAPP_DEFAULT_BOT_USERNAME
     updated = deepcopy(payload) if isinstance(payload, dict) else {}
     trial = dict(updated.get("tianji_trial") or {})
+    if _tianji_trial_request_is_active(trial.get("miniapp_request")):
+        return updated
     now = time.time()
     target = _target_runs(target_runs)
     trial["miniapp_request"] = {
@@ -116,7 +147,22 @@ def get_pending_tianji_trial_request(payload: object) -> dict:
     return {} if _is_stale_tianji_trial_request(request) else request
 
 
-def mark_tianji_trial_request_status(payload: object, status: str) -> dict:
+def is_tianji_trial_request_owned(payload: object, execution_owner: str) -> bool:
+    request = get_pending_tianji_trial_request(payload)
+    return bool(
+        request
+        and str(request.get("execution_owner") or "") == str(execution_owner or "")
+    )
+
+
+def mark_tianji_trial_request_status(
+    payload: object,
+    status: str,
+    *,
+    execution_owner: str = "",
+    now: Optional[float] = None,
+    lease_seconds: int = TIANJI_TRIAL_REQUEST_LEASE_SECONDS,
+) -> dict:
     if status not in {"resolving", "running"}:
         raise ValueError("Unsupported Tianji MiniApp request status")
     updated = deepcopy(payload) if isinstance(payload, dict) else {}
@@ -124,9 +170,14 @@ def mark_tianji_trial_request_status(payload: object, status: str) -> dict:
     request = dict(trial.get("miniapp_request") or {})
     if not request:
         return updated
-    now = time.time()
+    if execution_owner and str(request.get("execution_owner") or "") != execution_owner:
+        return updated
+    current_time = float(time.time() if now is None else now)
     request["status"] = status
-    request["started_at"] = request.get("started_at") or now
+    request["started_at"] = request.get("started_at") or current_time
+    if execution_owner:
+        request["execution_owner"] = execution_owner
+        request["lease_expires_at"] = current_time + max(1, int(lease_seconds))
     run = dict(trial.get("miniapp_run") or {})
     run.update(
         {
@@ -134,8 +185,64 @@ def mark_tianji_trial_request_status(payload: object, status: str) -> dict:
             "status_label": (
                 "正在获取第1关入口" if status == "resolving" else "正在执行天机试炼"
             ),
-            "updated_at": _now_text(now),
+            "updated_at": _now_text(current_time),
             "error": "",
+        }
+    )
+    trial["miniapp_request"] = request
+    trial["miniapp_run"] = run
+    updated["tianji_trial"] = trial
+    return updated
+
+
+def claim_tianji_trial_request(
+    payload: object,
+    execution_owner: str,
+    *,
+    now: Optional[float] = None,
+    lease_seconds: int = TIANJI_TRIAL_REQUEST_LEASE_SECONDS,
+) -> dict:
+    updated = deepcopy(payload) if isinstance(payload, dict) else {}
+    trial = dict(updated.get("tianji_trial") or {})
+    request = dict(trial.get("miniapp_request") or {})
+    status = str(request.get("status") or "")
+    if (
+        not request
+        or status not in {"queued", "resolving", "running"}
+        or _is_stale_tianji_trial_request(request)
+    ):
+        return updated
+    current_time = float(time.time() if now is None else now)
+    current_owner = str(request.get("execution_owner") or "")
+    if status == "queued" or current_owner == execution_owner:
+        request["execution_owner"] = execution_owner
+        request["claimed_at"] = request.get("claimed_at") or current_time
+        trial["miniapp_request"] = request
+        updated["tianji_trial"] = trial
+        return mark_tianji_trial_request_status(
+            updated,
+            "resolving",
+            execution_owner=execution_owner,
+            now=current_time,
+            lease_seconds=lease_seconds,
+        )
+    if _tianji_trial_request_is_active(request, now=current_time):
+        return updated
+    request.update(
+        {
+            "status": "interrupted",
+            "interrupted_at": current_time,
+            "lease_expires_at": current_time,
+            "error": TIANJI_TRIAL_REQUEST_INTERRUPTED_ERROR,
+        }
+    )
+    run = dict(trial.get("miniapp_run") or {})
+    run.update(
+        {
+            "status": "failed",
+            "status_label": "执行中断",
+            "updated_at": _now_text(current_time),
+            "error": TIANJI_TRIAL_REQUEST_INTERRUPTED_ERROR,
         }
     )
     trial["miniapp_request"] = request

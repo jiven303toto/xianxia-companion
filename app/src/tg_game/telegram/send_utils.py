@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from tg_game.services.external_sync import ASC_PROVIDER, is_external_account_expired
+from tg_game.services.profile_rebirth import ensure_profile_rebirth_send_allowed
 from tg_game.storage import Storage
 from tg_game.telegram.network_guard import (
     clear_network_pause,
@@ -106,6 +107,7 @@ async def send_message_with_thread_fallback(
     guard_network_pause: bool = False,
 ):
     resolved_storage = _resolve_storage(storage, client)
+    ensure_profile_rebirth_send_allowed(resolved_storage, profile_id, text)
     _ensure_external_session_available(resolved_storage, profile_id)
     if guard_network_pause:
         raise_if_network_paused(resolved_storage, profile_id)

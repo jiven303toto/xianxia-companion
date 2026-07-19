@@ -19,6 +19,12 @@ from tg_game.services.external_sync import (
     should_keep_external_session_fresh,
     sync_external_account,
 )
+from tg_game.services.profile_rebirth import (
+    ProfileRebirthLockedError,
+    REBIRTH_CHOICE_COMMAND_PREFIX,
+    REBIRTH_QUERY_COMMAND,
+    is_profile_rebirth_locked,
+)
 from tg_game.storage import Storage
 from tg_game.storage import OUTGOING_CONFIRM_TIMEOUT_SECONDS
 from tg_game.telegram.network_guard import (
@@ -410,7 +416,14 @@ async def _dispatch_outgoing_commands(
                     profile_id,
                     daily_tianxing.get("command"),
                 )
-            command = storage.claim_next_outgoing_command(profile_id)
+            if is_profile_rebirth_locked(storage, profile_id):
+                command = storage.claim_next_outgoing_command(
+                    profile_id,
+                    allowed_texts=(REBIRTH_QUERY_COMMAND,),
+                    allowed_prefixes=(REBIRTH_CHOICE_COMMAND_PREFIX,),
+                )
+            else:
+                command = storage.claim_next_outgoing_command(profile_id)
             if not command:
                 await asyncio.sleep(0.5)
                 continue
@@ -495,6 +508,10 @@ async def _dispatch_outgoing_commands(
             _schedule_xinggong_tianji_refresh(client, storage, profile_id, text)
         except asyncio.CancelledError:
             raise
+        except ProfileRebirthLockedError as exc:
+            if command and command.get("id"):
+                storage.defer_outgoing_command(command["id"], str(exc))
+            await asyncio.sleep(1)
         except Exception as exc:
             if is_network_send_error(exc):
                 mark_network_send_failure(storage, profile_id, exc)

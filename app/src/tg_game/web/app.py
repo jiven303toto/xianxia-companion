@@ -26,6 +26,16 @@ from tg_game.features.artifact.biz_artifact_touch_auto import (
     ARTIFACT_TOUCH_FEATURE_KEY,
     ARTIFACT_TOUCH_MIN_INTERVAL_SECONDS,
 )
+from tg_game.features.artifact.biz_artifact_nurture import (
+    ARTIFACT_NURTURE_AWAIT_REPLY_STATE,
+    ARTIFACT_NURTURE_BOT_COOLDOWN_STATE,
+    ARTIFACT_NURTURE_DEFAULT_COOLDOWN_SECONDS,
+    ARTIFACT_NURTURE_DEFAULT_TARGET_NAME,
+    ARTIFACT_NURTURE_FEATURE_KEY,
+    ARTIFACT_NURTURE_REPLY_WAIT_SECONDS,
+    ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+    build_artifact_nurture_resource_state,
+)
 from tg_game.features.artifact.biz_artifact_trial import (
     ARTIFACT_TRIAL_AWAIT_REPLY_STATE,
     ARTIFACT_TRIAL_BOT_COOLDOWN_STATE,
@@ -39,6 +49,9 @@ from tg_game.features.companion.biz_companion_voyage import (
     COMPANION_VOYAGE_STRATEGY_OPTIONS,
     normalize_companion_voyage_strategy,
 )
+from tg_game.features.beast_merge import biz_beast_merge_daily_auto
+from tg_game.features.beast_merge import biz_beast_merge_state
+from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.countdowns.biz_countdowns_view_model import (
     build_auto_task_countdown_items as _countdown_build_auto_task_countdown_items,
     build_companion_voyage_countdown_items as _countdown_build_companion_voyage_countdown_items,
@@ -219,15 +232,20 @@ from tg_game.web.biz_web_display_formatting import (
 )
 from tg_game.web import admin_global_execution
 from tg_game.web.biz_artifact_view_model import (
+    build_artifact_nurture_auto_view as _artifact_build_artifact_nurture_auto_view,
+    build_artifact_nurture_command as _artifact_build_artifact_nurture_command,
     build_artifact_touch_auto_view as _artifact_build_artifact_touch_auto_view,
     build_artifact_trial_auto_view as _artifact_build_artifact_trial_auto_view,
     build_artifact_trial_command as _artifact_build_artifact_trial_command,
+    normalize_artifact_nurture_target_name as _artifact_normalize_artifact_nurture_target_name,
     normalize_artifact_touch_command as _artifact_normalize_artifact_touch_command,
     normalize_artifact_touch_interval as _artifact_normalize_artifact_touch_interval,
     normalize_artifact_trial_artifact_name as _artifact_normalize_artifact_trial_artifact_name,
     normalize_artifact_trial_route as _artifact_normalize_artifact_trial_route,
+    pack_artifact_nurture_strategy as _artifact_pack_artifact_nurture_strategy,
     pack_artifact_touch_strategy as _artifact_pack_artifact_touch_strategy,
     pack_artifact_trial_strategy as _artifact_pack_artifact_trial_strategy,
+    unpack_artifact_nurture_strategy as _artifact_unpack_artifact_nurture_strategy,
     unpack_artifact_touch_strategy as _artifact_unpack_artifact_touch_strategy,
     unpack_artifact_trial_strategy as _artifact_unpack_artifact_trial_strategy,
 )
@@ -2240,6 +2258,7 @@ def create_app() -> FastAPI:
         dongfu_state = payload_view_state["dongfu_state"]
         divination_batch_state = _build_divination_batch_view(None)
         fishing_state = _build_fishing_view(None)
+        beast_merge_state = biz_beast_merge_state.build_beast_merge_view({})
         small_world_state = biz_small_world_game.parse_small_world_reply("")
         small_world_auto_state = _build_small_world_auto_view(None)
         small_world_preach_auto_state = _build_small_world_preach_auto_view(None)
@@ -2260,6 +2279,7 @@ def create_app() -> FastAPI:
             build_estate_hunt_daily_auto_view=_build_estate_hunt_daily_auto_view,
             build_artifact_touch_auto_view=_build_artifact_touch_auto_view,
             build_artifact_trial_auto_view=_build_artifact_trial_auto_view,
+            build_artifact_nurture_auto_view=_build_artifact_nurture_auto_view,
             build_wild_experience_view=_build_wild_experience_view,
             build_companion_heart_tribulation_view=(
                 _build_companion_heart_tribulation_view
@@ -2276,6 +2296,7 @@ def create_app() -> FastAPI:
         estate_hunt_daily_auto_state = default_state["estate_hunt_daily_auto_state"]
         artifact_touch_auto_state = default_state["artifact_touch_auto_state"]
         artifact_trial_auto_state = default_state["artifact_trial_auto_state"]
+        artifact_nurture_auto_state = default_state["artifact_nurture_auto_state"]
         wild_experience_state = default_state["wild_experience_state"]
         companion_heart_tribulation_state = default_state[
             "companion_heart_tribulation_state"
@@ -2355,14 +2376,19 @@ def create_app() -> FastAPI:
                     command_chat=command_chat,
                     artifact_touch_feature_key=ARTIFACT_TOUCH_FEATURE_KEY,
                     artifact_trial_feature_key=ARTIFACT_TRIAL_FEATURE_KEY,
+                    artifact_nurture_feature_key=ARTIFACT_NURTURE_FEATURE_KEY,
                     build_artifact_touch_auto_view=_build_artifact_touch_auto_view,
                     build_artifact_trial_auto_view=_build_artifact_trial_auto_view,
+                    build_artifact_nurture_auto_view=_build_artifact_nurture_auto_view,
                 )
                 artifact_touch_auto_state = artifact_module_state[
                     "artifact_touch_auto_state"
                 ]
                 artifact_trial_auto_state = artifact_module_state[
                     "artifact_trial_auto_state"
+                ]
+                artifact_nurture_auto_state = artifact_module_state[
+                    "artifact_nurture_auto_state"
                 ]
             elif module_key in {"other", "estate", "dungeon", "stock", "fishing", "small_world"}:
                 command_chat = _get_primary_command_chat(
@@ -2421,6 +2447,7 @@ def create_app() -> FastAPI:
                         },
                         artifact_touch_feature_key=ARTIFACT_TOUCH_FEATURE_KEY,
                         artifact_trial_feature_key=ARTIFACT_TRIAL_FEATURE_KEY,
+                        artifact_nurture_feature_key=ARTIFACT_NURTURE_FEATURE_KEY,
                         mulan_auto_support_feature_key=MULAN_AUTO_SUPPORT_FEATURE_KEY,
                         companion_panel_command=COMPANION_PANEL_COMMAND,
                         companion_voyage_status_command=COMPANION_VOYAGE_STATUS_COMMAND,
@@ -2446,6 +2473,15 @@ def create_app() -> FastAPI:
                         ),
                         build_artifact_touch_auto_view=_build_artifact_touch_auto_view,
                         build_artifact_trial_auto_view=_build_artifact_trial_auto_view,
+                        build_artifact_nurture_auto_view=_build_artifact_nurture_auto_view,
+                    )
+                    beast_merge_state = biz_beast_merge_state.build_beast_merge_view(
+                        payload,
+                        storage.get_companion_auto_task(
+                            active_profile.id,
+                            command_chat.chat_id if command_chat else 0,
+                            biz_beast_merge_daily_auto.FEATURE_KEY,
+                        ),
                     )
                 if module_key == "estate":
                     estate_module_state = _module_detail_build_estate_module_state(
@@ -2526,6 +2562,9 @@ def create_app() -> FastAPI:
 
         shared_template_context = _build_shared_template_context(active_profile)
         sect_command_context = _build_sect_command_target_context(active_profile, sect_chat)
+        rift_cooldown_label = biz_fanren_game.get_rift_cooldown_label(
+            storage, active_profile_id
+        )
 
         return templates.TemplateResponse(
             request,
@@ -2537,6 +2576,7 @@ def create_app() -> FastAPI:
                 "module_setting": module_setting,
                 **cultivation_state,
                 "cultivation_session": cultivation_session,
+                "rift_cooldown_label": rift_cooldown_label,
                 "sect_session": sect_session,
                 "module_commands": MODULE_COMMANDS.get(module_key, []),
                 "sect_features": SECT_FEATURES,
@@ -2554,6 +2594,7 @@ def create_app() -> FastAPI:
                 "other_opponent_options": other_opponent_options,
                 "divination_batch_state": divination_batch_state,
                 "fishing_state": fishing_state,
+                "beast_merge_state": beast_merge_state,
                 "small_world_state": small_world_state,
                 "small_world_auto_state": small_world_auto_state,
                 "small_world_preach_auto_state": small_world_preach_auto_state,
@@ -2571,6 +2612,7 @@ def create_app() -> FastAPI:
             "estate_hunt_daily_auto_state": estate_hunt_daily_auto_state,
             "artifact_touch_auto_state": artifact_touch_auto_state,
             "artifact_trial_auto_state": artifact_trial_auto_state,
+            "artifact_nurture_auto_state": artifact_nurture_auto_state,
             "wild_experience_state": wild_experience_state,
             "companion_heart_tribulation_state": companion_heart_tribulation_state,
                 **other_module_state,
@@ -3372,6 +3414,127 @@ def create_app() -> FastAPI:
         )
         return RedirectResponse(url=redirect_to, status_code=303)
 
+    @application.post("/runtime/beast-merge/auto")
+    async def runtime_start_beast_merge_auto(
+        request: Request,
+        chat_id: str = Form(...),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/other"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Chat ID not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+
+        def queue_request(latest: dict) -> dict:
+            if biz_beast_merge_state.is_beast_merge_daily_limit_reached(latest):
+                return latest
+            return biz_beast_merge_state.queue_beast_merge_request(
+                latest,
+                chat_id=resolved_chat_id,
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
+            )
+
+        storage.update_external_account_payload(
+            profile.id,
+            ASC_PROVIDER,
+            queue_request,
+        )
+        return RedirectResponse(url=redirect_to, status_code=303)
+
+    @application.post("/runtime/beast-merge/daily-auto")
+    async def runtime_toggle_beast_merge_daily_auto(
+        request: Request,
+        chat_id: str = Form(...),
+        run_time: str = Form(biz_beast_merge_daily_auto.DEFAULT_RUN_TIME),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/other"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        if admin_global_execution.is_schedule_enabled(storage, "beast_merge"):
+            raise HTTPException(
+                status_code=409,
+                detail="已由“诸元神巡令”统一托管",
+            )
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Chat ID not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        feature_key = biz_beast_merge_daily_auto.FEATURE_KEY
+        existing_task = storage.get_companion_auto_task(
+            profile.id,
+            resolved_chat_id,
+            feature_key,
+        )
+        if existing_task and bool(existing_task.get("enabled")):
+            storage.disable_companion_auto_task(
+                profile.id,
+                resolved_chat_id,
+                feature_key,
+                last_error="用户手动关闭每日噬金虫进化。",
+            )
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        now_ts = biz_fanren_game.time.time()
+        payload = read_cached_external_payload(storage, profile.id)
+        sent_today = biz_beast_merge_daily_auto.is_same_local_day(
+            float((existing_task or {}).get("last_run_at") or 0),
+            now_ts,
+        )
+        requested_today = biz_beast_merge_state.was_beast_merge_requested_today(
+            payload,
+            now=now_ts,
+        )
+        limit_reached = biz_beast_merge_state.is_beast_merge_daily_limit_reached(payload)
+        normalized_run_time = biz_beast_merge_daily_auto.normalize_run_time(run_time)
+        next_run_at = biz_beast_merge_daily_auto.resolve_next_run_at(
+            normalized_run_time,
+            now=now_ts,
+            attempted_today=sent_today or requested_today or limit_reached,
+        )
+        task = storage.upsert_companion_auto_task(
+            profile_id=profile.id,
+            chat_id=resolved_chat_id,
+            feature_key=feature_key,
+            enabled=True,
+            strategy=normalized_run_time,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+            next_run_at=next_run_at,
+            last_run_at=float((existing_task or {}).get("last_run_at") or 0),
+            last_error=(
+                biz_beast_merge_daily_auto.LIMIT_REACHED_ERROR
+                if limit_reached
+                else (
+                    biz_beast_merge_daily_auto.SENT_TODAY_ERROR
+                    if sent_today or requested_today
+                    else ""
+                )
+            ),
+        )
+        storage.update_companion_auto_task(int(task["id"]), workflow_state="")
+        return RedirectResponse(url=redirect_to, status_code=303)
+
     @application.post("/runtime/estate/miniapp-hunt-daily-auto")
     async def runtime_toggle_estate_miniapp_hunt_daily_auto(
         request: Request,
@@ -4169,6 +4332,47 @@ def create_app() -> FastAPI:
         storage.update_companion_auto_task(int(task["id"]), workflow_state="")
         return RedirectResponse(url=redirect_to, status_code=303)
 
+    @application.post("/runtime/pagoda/miniapp-run")
+    async def runtime_start_pagoda_miniapp_run(
+        request: Request,
+        chat_id: str = Form(...),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/other"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Chat ID not configured")
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        storage.cancel_pending_outgoing_commands(
+            profile.id,
+            int(normalized_chat_id),
+            text=pagoda_auto.COMMAND,
+            thread_id=resolved_thread_id,
+            require_exact_thread=True,
+        )
+        updated = storage.update_external_account_payload(
+            profile.id,
+            ASC_PROVIDER,
+            lambda latest: pagoda_state.queue_pagoda_request(
+                latest,
+                chat_id=int(normalized_chat_id),
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
+            ),
+        )
+        if not pagoda_state.has_active_pagoda_request(updated):
+            raise HTTPException(status_code=409, detail="天机阁账号未连接")
+        return RedirectResponse(url=redirect_to, status_code=303)
+
     @application.post("/runtime/commands/pagoda-auto")
     async def runtime_toggle_pagoda_auto(
         request: Request,
@@ -4227,7 +4431,7 @@ def create_app() -> FastAPI:
         attempted_today = pagoda_auto.attempted_today_from_payload(
             payload if isinstance(payload, dict) else {},
             now=now_ts,
-        )
+        ) or pagoda_state.was_pagoda_completed_today(payload, now=now_ts)
         next_run_at = pagoda_auto.resolve_next_run_at(
             normalized_run_time,
             now=now_ts,
@@ -4916,6 +5120,109 @@ def create_app() -> FastAPI:
                 int(task["id"]),
                 workflow_state=ARTIFACT_TRIAL_AWAIT_REPLY_STATE,
                 last_error="已发送器灵试炼，等待bot回包。",
+            )
+        return RedirectResponse(url=redirect_to, status_code=303)
+
+    @application.post("/runtime/artifact/nurture-auto")
+    async def runtime_toggle_artifact_nurture_auto(
+        request: Request,
+        chat_id: str = Form(...),
+        target_name: str = Form(ARTIFACT_NURTURE_DEFAULT_TARGET_NAME),
+        thread_id: Optional[str] = Form(None),
+        chat_type: str = Form("group"),
+        bot_username: str = Form("fanrenxiuxian_bot"),
+        redirect_to: str = Form("/modules/other"),
+    ) -> RedirectResponse:
+        profile = _get_request_profile(request)
+        if not profile:
+            raise HTTPException(status_code=401, detail="Profile not active")
+        expired_redirect = _ensure_external_session_active(profile)
+        if expired_redirect:
+            return expired_redirect
+
+        normalized_chat_id = str(chat_id or "").strip()
+        if not normalized_chat_id:
+            raise HTTPException(status_code=400, detail="Chat ID not configured")
+        resolved_chat_id = int(normalized_chat_id)
+        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
+        normalized_target_name = _normalize_artifact_nurture_target_name(target_name)
+        command_text = _build_artifact_nurture_command(normalized_target_name)
+
+        existing_task = storage.get_companion_auto_task(
+            profile.id, resolved_chat_id, ARTIFACT_NURTURE_FEATURE_KEY
+        )
+        if existing_task and bool(existing_task.get("enabled")):
+            existing_target_name = _unpack_artifact_nurture_strategy(
+                existing_task.get("strategy") or ""
+            )
+            storage.disable_companion_auto_task(
+                profile.id,
+                resolved_chat_id,
+                ARTIFACT_NURTURE_FEATURE_KEY,
+                last_error="用户手动关闭自动温养器灵。",
+            )
+            storage.cancel_pending_outgoing_commands(
+                profile.id,
+                resolved_chat_id,
+                text=_build_artifact_nurture_command(existing_target_name),
+                thread_id=resolved_thread_id,
+                require_exact_thread=True,
+            )
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        payload = _refresh_cultivator_payload(profile.id)
+        resources = build_artifact_nurture_resource_state(
+            payload if isinstance(payload, dict) else {},
+            storage.get_game_items(),
+        )
+        strategy = _pack_artifact_nurture_strategy(normalized_target_name)
+        if not resources.get("ok"):
+            task = storage.upsert_companion_auto_task(
+                profile_id=profile.id,
+                chat_id=resolved_chat_id,
+                feature_key=ARTIFACT_NURTURE_FEATURE_KEY,
+                enabled=False,
+                strategy=strategy,
+                thread_id=resolved_thread_id,
+                chat_type=chat_type,
+                bot_username=bot_username,
+                next_run_at=0,
+                last_error=str(resources.get("error_text") or "资源不足。"),
+            )
+            if task.get("id"):
+                storage.update_companion_auto_task(
+                    int(task["id"]),
+                    workflow_state=ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+                )
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        now_ts = biz_fanren_game.time.time()
+        task = storage.upsert_companion_auto_task(
+            profile_id=profile.id,
+            chat_id=resolved_chat_id,
+            feature_key=ARTIFACT_NURTURE_FEATURE_KEY,
+            enabled=True,
+            strategy=strategy,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+            next_run_at=now_ts + ARTIFACT_NURTURE_REPLY_WAIT_SECONDS,
+            last_run_at=now_ts,
+            last_error="已发送温养器灵，等待bot回包。",
+        )
+        storage.enqueue_outgoing_command(
+            profile_id=profile.id,
+            chat_id=resolved_chat_id,
+            text=command_text,
+            thread_id=resolved_thread_id,
+            chat_type=chat_type,
+            bot_username=bot_username,
+        )
+        if task.get("id"):
+            storage.update_companion_auto_task(
+                int(task["id"]),
+                workflow_state=ARTIFACT_NURTURE_AWAIT_REPLY_STATE,
+                last_error="已发送温养器灵，等待bot回包。",
             )
         return RedirectResponse(url=redirect_to, status_code=303)
 

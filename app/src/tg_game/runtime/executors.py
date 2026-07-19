@@ -35,6 +35,19 @@ from tg_game.features.artifact.biz_artifact_touch_auto import (
     normalize_artifact_touch_interval,
     unpack_artifact_touch_strategy,
 )
+from tg_game.features.artifact.biz_artifact_nurture import (
+    ARTIFACT_NURTURE_AWAIT_REPLY_STATE,
+    ARTIFACT_NURTURE_BOT_COOLDOWN_STATE,
+    ARTIFACT_NURTURE_DEFAULT_COOLDOWN_SECONDS,
+    ARTIFACT_NURTURE_FEATURE_KEY,
+    ARTIFACT_NURTURE_INTERNAL_WAIT_STATE,
+    ARTIFACT_NURTURE_REPLY_WAIT_SECONDS,
+    ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+    build_artifact_nurture_command,
+    build_artifact_nurture_resource_state,
+    normalize_artifact_nurture_target_name,
+    unpack_artifact_nurture_strategy,
+)
 from tg_game.features.artifact.biz_artifact_trial import (
     build_artifact_trial_command,
     build_artifact_trial_resource_state,
@@ -54,12 +67,17 @@ from tg_game.features.companion.biz_companion_voyage import (
     normalize_companion_voyage_strategy,
     parse_chinese_duration_seconds,
 )
+from tg_game.features.beast_merge import biz_beast_merge_daily_auto
+from tg_game.features.beast_merge import biz_beast_merge_miniapp as beast_merge_miniapp
+from tg_game.features.beast_merge import biz_beast_merge_state
 from tg_game.features.estate import biz_estate_miniapp as estate_miniapp
 from tg_game.features.estate import biz_estate_hunt_daily_auto
 from tg_game.features.estate.biz_estate_miniapp import (
     extract_estate_miniapp_entry,
     merge_estate_miniapp_payload,
 )
+from tg_game.features.pagoda import biz_pagoda_miniapp as pagoda_miniapp
+from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
 from tg_game.features.tianji_trial import biz_tianji_trial_miniapp as tianji_trial_miniapp
 from tg_game.features.tianji_trial import biz_tianji_trial_remnant_state
@@ -123,6 +141,7 @@ from tg_game.features.wanling.biz_wanling_roam import (
 )
 from tg_game.services.cultivation_sync import sync_cultivation_session
 from tg_game.services.external_sync import ASC_PROVIDER, read_cached_external_payload
+from tg_game.services import profile_rebirth
 from tg_game.storage import (
     OUTGOING_CONFIRM_TIMEOUT_SECONDS,
     OUTGOING_CONFIRMED_STATUSES,
@@ -142,6 +161,7 @@ DIVINATION_BATCH_POLL_SECONDS = 5
 FANREN_RECENT_REPLY_WINDOW_SECONDS = 30
 COMPANION_AUTO_POLL_SECONDS = 5
 FISHING_AUTO_POLL_SECONDS = 2
+PAGODA_LEASE_RENEW_INTERVAL_SECONDS = 60
 COMPANION_HEART_TRIBULATION_EMPTY_SLEEP_SECONDS = 5
 COMPANION_HEART_TRIBULATION_ACTIVE_POLL_SECONDS = 2
 COMPANION_HEART_TRIBULATION_IDLE_SLEEP_MAX_SECONDS = 60
@@ -167,6 +187,7 @@ ARTIFACT_TRIAL_AWAIT_REPLY_STATE = "artifact_trial_await_reply"
 ARTIFACT_TRIAL_BOT_COOLDOWN_STATE = "artifact_trial_bot_cooldown"
 ARTIFACT_TRIAL_INTERNAL_WAIT_STATE = "artifact_trial_internal_wait"
 ARTIFACT_TRIAL_STOPPED_RESOURCES_STATE = "artifact_trial_stopped_resources"
+ARTIFACT_NURTURE_COOLDOWN_BUFFER_SECONDS = 10
 COMPANION_PANEL_COMMAND = ".我的侍妾"
 COMPANION_VOYAGE_FEATURE_KEY = "companion_voyage"
 COMPANION_VOYAGE_STATUS_COMMAND = ".远航状态"
@@ -205,6 +226,7 @@ COMPANION_PANEL_COOLDOWN_LABELS = {
 COMPANION_AUTO_RESUME_HIGH_RISK_FEATURES = {
     ARTIFACT_TOUCH_FEATURE_KEY,
     ARTIFACT_TRIAL_FEATURE_KEY,
+    ARTIFACT_NURTURE_FEATURE_KEY,
     WANLING_ROAM_FEATURE_KEY,
     XINGGONG_STARBOARD_FEATURE_KEY,
     biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
@@ -241,13 +263,16 @@ COMPANION_HEART_TRIBULATION_ACTIVE_STATES = {
 }
 COMPANION_AUTO_FEATURES = {
     pagoda_auto.FEATURE_KEY: {
-        "command": pagoda_auto.COMMAND,
+        "command": "",
     },
     biz_tianji_trial_daily_auto.FEATURE_KEY: {
         "command": biz_tianji_trial_daily_auto.REMNANT_COMMAND,
     },
     biz_estate_hunt_daily_auto.FEATURE_KEY: {
         "command": biz_estate_hunt_daily_auto.COMMAND_LABEL,
+    },
+    biz_beast_merge_daily_auto.FEATURE_KEY: {
+        "command": "",
     },
     biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY: {
         "command": "",
@@ -262,6 +287,9 @@ COMPANION_AUTO_FEATURES = {
     },
     ARTIFACT_TRIAL_FEATURE_KEY: {
         "command": ".器灵试炼",
+    },
+    ARTIFACT_NURTURE_FEATURE_KEY: {
+        "command": ".温养器灵",
     },
     WANLING_ROAM_FEATURE_KEY: {
         "command": WANLING_ROAM_COMMAND,
@@ -311,6 +339,9 @@ def get_companion_auto_task_command_prefixes(task: dict) -> tuple[str, ...]:
             task.get("strategy") or ""
         )
         commands.append(_build_artifact_trial_command(artifact_name, route))
+    elif feature_key == ARTIFACT_NURTURE_FEATURE_KEY:
+        target_name = _unpack_artifact_nurture_strategy(task.get("strategy") or "")
+        commands.append(_build_artifact_nurture_command(target_name))
     elif feature_key == WANLING_ROAM_FEATURE_KEY:
         commands.extend(build_wanling_roam_cancel_commands(task.get("strategy") or ""))
     elif feature_key == XINGGONG_STARBOARD_FEATURE_KEY:
@@ -551,6 +582,19 @@ def _update_external_payload(
     )
 
 
+def _cancel_legacy_pagoda_outgoing(storage: Storage, profile_id: int) -> int:
+    cancelled = 0
+    for binding in storage.list_chat_bindings(int(profile_id)):
+        cancelled += storage.cancel_pending_outgoing_commands(
+            int(profile_id),
+            int(binding.chat_id),
+            text=pagoda_auto.COMMAND,
+            thread_id=binding.thread_id,
+            require_exact_thread=True,
+        )
+    return cancelled
+
+
 async def _run_pending_estate_public_hunt(
     client: object,
     storage: Storage,
@@ -624,6 +668,135 @@ async def _run_pending_estate_public_hunt(
             execution_owner,
         )
         else latest,
+    )
+    return True
+
+
+async def _run_pending_beast_merge_public(
+    client: object,
+    storage: Storage,
+    profile_id: int,
+    payload: Optional[dict] = None,
+) -> bool:
+    _ = payload
+    execution_owner = secrets.token_hex(16)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: biz_beast_merge_state.claim_beast_merge_request(
+            latest,
+            execution_owner,
+        ),
+    )
+    if not biz_beast_merge_state.is_beast_merge_request_owned(
+        current_payload,
+        execution_owner,
+    ):
+        return False
+
+    def save_progress(progress: dict) -> None:
+        nonlocal current_payload
+        current_payload = _update_external_payload(
+            storage,
+            int(profile_id),
+            lambda latest: biz_beast_merge_state.apply_beast_merge_progress(
+                latest,
+                progress,
+                execution_owner=execution_owner,
+            ),
+        )
+
+    result = await beast_merge_miniapp.run_beast_merge_public_production_flow(
+        client,
+        discovery_storage=storage,
+        progress_callback=save_progress,
+    )
+    if not result.get("ok"):
+        logger.warning(
+            "Beast merge public MiniApp flow failed: %s",
+            beast_merge_miniapp.sanitize_beast_merge_secret_text(
+                result.get("error")
+            ),
+        )
+    _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: biz_beast_merge_state.finish_beast_merge_request(
+            latest,
+            result,
+            execution_owner=execution_owner,
+        ),
+    )
+    return True
+
+
+async def _run_pending_pagoda_public(
+    client: object,
+    storage: Storage,
+    profile_id: int,
+    payload: Optional[dict] = None,
+) -> bool:
+    _ = payload
+    execution_owner = secrets.token_hex(16)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: pagoda_state.claim_pagoda_request(
+            latest,
+            execution_owner,
+        ),
+    )
+    if not pagoda_state.is_pagoda_request_owned(current_payload, execution_owner):
+        return False
+
+    def mark_running(phase: str = "start") -> None:
+        nonlocal current_payload
+        current_payload = _update_external_payload(
+            storage,
+            int(profile_id),
+            lambda latest: pagoda_state.mark_pagoda_request_running(
+                latest,
+                execution_owner=execution_owner,
+                phase=phase,
+            ),
+        )
+
+    flow_task = asyncio.create_task(
+        pagoda_miniapp.run_pagoda_public_production_flow(
+            client,
+            discovery_storage=storage,
+            progress_callback=mark_running,
+        )
+    )
+    while True:
+        try:
+            result = await asyncio.wait_for(
+                asyncio.shield(flow_task),
+                timeout=PAGODA_LEASE_RENEW_INTERVAL_SECONDS,
+            )
+            break
+        except asyncio.TimeoutError:
+            current_payload = _update_external_payload(
+                storage,
+                int(profile_id),
+                lambda latest: pagoda_state.renew_pagoda_request_lease(
+                    latest,
+                    execution_owner=execution_owner,
+                ),
+            )
+    if not result.get("ok"):
+        logger.warning(
+            "Pagoda public MiniApp flow failed: %s",
+            pagoda_miniapp._safe_text(result.get("error")),
+        )
+    _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: pagoda_state.finish_pagoda_request(
+            latest,
+            result,
+            execution_owner=execution_owner,
+        ),
     )
     return True
 
@@ -2824,6 +2997,9 @@ async def _run_companion_heart_tribulation_scheduler(
 
     while True:
         try:
+            if profile_rebirth.is_profile_rebirth_locked(storage, int(profile_id)):
+                await asyncio.sleep(COMPANION_HEART_TRIBULATION_EMPTY_SLEEP_SECONDS)
+                continue
             tasks = storage.list_active_companion_heart_tribulation_tasks(int(profile_id))
             now = time.time()
             if not tasks:
@@ -3246,6 +3422,18 @@ def _build_artifact_trial_command(artifact_name: object, route: object) -> str:
     return build_artifact_trial_command(artifact_name, route)
 
 
+def _normalize_artifact_nurture_target_name(value: object) -> str:
+    return normalize_artifact_nurture_target_name(value)
+
+
+def _unpack_artifact_nurture_strategy(value: object) -> str:
+    return unpack_artifact_nurture_strategy(value)
+
+
+def _build_artifact_nurture_command(target_name: object) -> str:
+    return build_artifact_nurture_command(target_name)
+
+
 def _artifact_touch_parent_matches_profile(
     parent: Optional[dict], profile: object, command_text: str
 ) -> bool:
@@ -3260,6 +3448,19 @@ def _artifact_touch_parent_matches_profile(
 
 
 def _artifact_trial_parent_matches_profile(
+    parent: Optional[dict], profile: object, command_text: str
+) -> bool:
+    if not parent or bool(parent.get("is_bot")):
+        return False
+    if str(parent.get("text") or "").strip() != command_text:
+        return False
+    if str(parent.get("direction") or "") == "outgoing":
+        return True
+    expected_user_id = str(getattr(profile, "telegram_user_id", "") or "").strip()
+    return bool(expected_user_id) and str(parent.get("sender_id") or "") == expected_user_id
+
+
+def _artifact_nurture_parent_matches_profile(
     parent: Optional[dict], profile: object, command_text: str
 ) -> bool:
     if not parent or bool(parent.get("is_bot")):
@@ -3545,6 +3746,127 @@ def sync_artifact_trial_auto_from_latest_reply(
     if not reply:
         return False
     return reschedule_artifact_trial_auto_on_reply(
+        storage,
+        profile_id=int(profile_id),
+        chat_id=chat_id,
+        reply_to_msg_id=int(reply.get("reply_to_msg_id") or 0),
+        reply_text=str(reply.get("text") or ""),
+        reply_created_at=float(reply.get("created_at") or 0),
+        now=now,
+    )
+
+
+def _reschedule_artifact_nurture_task_from_reply(
+    storage: Storage,
+    task: dict,
+    *,
+    profile: object,
+    parent: dict,
+    reply_text: str,
+    reply_created_at: float = 0,
+    now: Optional[float] = None,
+) -> bool:
+    target_name = _unpack_artifact_nurture_strategy(task.get("strategy") or "")
+    command_text = _build_artifact_nurture_command(target_name)
+    if not _artifact_nurture_parent_matches_profile(parent, profile, command_text):
+        return False
+    parsed = biz_artifact_game.parse_message(reply_text)
+    if not parsed or parsed.get("event") != "artifact_nurture":
+        return False
+    if parsed.get("insufficient_resources"):
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            enabled=0,
+            next_run_at=0,
+            workflow_state=ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+            last_error="bot提示温养器灵资源不足，已停止自动温养。",
+        )
+        return True
+    current_ts = float(now if now is not None else time.time())
+    cooldown_seconds = int(parsed.get("cooldown_seconds") or 0)
+    if cooldown_seconds <= 0:
+        cooldown_seconds = ARTIFACT_NURTURE_DEFAULT_COOLDOWN_SECONDS
+    base_ts = float(reply_created_at or current_ts)
+    target_ts = base_ts + cooldown_seconds + ARTIFACT_NURTURE_COOLDOWN_BUFFER_SECONDS
+    if target_ts <= current_ts:
+        return False
+    storage.update_companion_auto_task(
+        int(task["id"]),
+        next_run_at=target_ts,
+        workflow_state=ARTIFACT_NURTURE_BOT_COOLDOWN_STATE,
+        last_error="",
+    )
+    return True
+
+
+def reschedule_artifact_nurture_auto_on_reply(
+    storage: Storage,
+    *,
+    profile_id: int,
+    chat_id: int,
+    reply_to_msg_id: int,
+    reply_text: str,
+    reply_created_at: float = 0,
+    now: Optional[float] = None,
+) -> bool:
+    if not reply_to_msg_id:
+        return False
+    profile = storage.get_profile(int(profile_id))
+    if not profile:
+        return False
+    task = storage.get_companion_auto_task(
+        int(profile_id),
+        int(chat_id),
+        ARTIFACT_NURTURE_FEATURE_KEY,
+    )
+    if not task or not bool(task.get("enabled")):
+        return False
+    parent = storage.get_bound_message(int(chat_id), int(reply_to_msg_id), int(profile_id))
+    if not parent:
+        return False
+    task_thread_id = task.get("thread_id")
+    if task_thread_id:
+        parent_thread_id = parent.get("thread_id")
+        if parent_thread_id is not None and int(parent_thread_id) != int(task_thread_id):
+            return False
+    return _reschedule_artifact_nurture_task_from_reply(
+        storage,
+        task,
+        profile=profile,
+        parent=parent,
+        reply_text=reply_text,
+        reply_created_at=reply_created_at,
+        now=now,
+    )
+
+
+def sync_artifact_nurture_auto_from_latest_reply(
+    storage: Storage, profile_id: int, task: dict, *, now: Optional[float] = None
+) -> bool:
+    profile = storage.get_profile(int(profile_id))
+    if not profile:
+        return False
+    target_name = _unpack_artifact_nurture_strategy(task.get("strategy") or "")
+    command_text = _build_artifact_nurture_command(target_name)
+    chat_id = int(task.get("chat_id") or 0)
+    if not chat_id:
+        return False
+    sender_id = None
+    try:
+        sender_id = int(str(profile.telegram_user_id or "").strip())
+    except (TypeError, ValueError):
+        sender_id = None
+    reply = storage.get_latest_bot_reply_for_command(
+        chat_id,
+        command_text,
+        profile_id=int(profile_id),
+        thread_id=int(task.get("thread_id")) if task.get("thread_id") else None,
+        sender_id=sender_id,
+        sender_username=str(profile.telegram_username or ""),
+    )
+    if not reply:
+        return False
+    return reschedule_artifact_nurture_auto_on_reply(
         storage,
         profile_id=int(profile_id),
         chat_id=chat_id,
@@ -4343,6 +4665,12 @@ async def _run_companion_auto_scheduler(
                     task for task in tasks if int(task.get("id") or 0) in task_ids
                 ]
             now = time.time()
+            _cancel_legacy_pagoda_outgoing(storage, int(profile_id))
+            if profile_rebirth.is_profile_rebirth_locked(storage, int(profile_id)):
+                if run_once:
+                    return
+                await asyncio.sleep(COMPANION_AUTO_POLL_SECONDS)
+                continue
             if is_network_paused(storage, int(profile_id), now=now):
                 if run_once:
                     return
@@ -4359,7 +4687,21 @@ async def _run_companion_auto_scheduler(
                 payload,
             ):
                 payload = read_cached_external_payload(storage, int(profile_id))
+            if task_ids is None and await _run_pending_beast_merge_public(
+                client,
+                storage,
+                int(profile_id),
+                payload,
+            ):
+                payload = read_cached_external_payload(storage, int(profile_id))
             if task_ids is None and await _run_pending_tianji_public_trial(
+                client,
+                storage,
+                int(profile_id),
+                payload,
+            ):
+                payload = read_cached_external_payload(storage, int(profile_id))
+            if task_ids is None and await _run_pending_pagoda_public(
                 client,
                 storage,
                 int(profile_id),
@@ -4436,6 +4778,9 @@ async def _run_companion_auto_scheduler(
                         )
                         continue
                     run_time = pagoda_auto.normalize_run_time(task.get("strategy"))
+                    thread_id = (
+                        int(task.get("thread_id")) if task.get("thread_id") else None
+                    )
                     next_run_at = float(task.get("next_run_at") or 0)
                     staggered_next_run_at = pagoda_auto.stagger_existing_next_run_at(
                         next_run_at,
@@ -4449,9 +4794,6 @@ async def _run_companion_auto_scheduler(
                         )
                     if next_run_at > now:
                         continue
-                    thread_id = (
-                        int(task.get("thread_id")) if task.get("thread_id") else None
-                    )
                     tomorrow_run_at = pagoda_auto.resolve_next_run_at(
                         run_time,
                         now=now,
@@ -4463,11 +4805,13 @@ async def _run_companion_auto_scheduler(
                         storage.update_companion_auto_task(
                             task_id,
                             next_run_at=tomorrow_run_at,
-                            workflow_state="sent_today",
+                            workflow_state="requested_today",
                             last_error=pagoda_auto.SENT_TODAY_ERROR,
                         )
                         continue
-                    if pagoda_auto.attempted_today_from_payload(payload, now=now):
+                    if pagoda_auto.attempted_today_from_payload(
+                        payload, now=now
+                    ) or pagoda_state.was_pagoda_completed_today(payload, now=now):
                         storage.update_companion_auto_task(
                             task_id,
                             next_run_at=tomorrow_run_at,
@@ -4475,32 +4819,36 @@ async def _run_companion_auto_scheduler(
                             last_error=pagoda_auto.ATTEMPTED_TODAY_ERROR,
                         )
                         continue
-                    if _has_pending_outgoing_command(
-                        storage,
-                        profile_id=int(profile_id),
-                        chat_id=chat_id,
-                        text=pagoda_auto.COMMAND,
-                        thread_id=thread_id,
-                    ):
+                    if pagoda_state.has_active_pagoda_request(payload, now=now):
                         storage.update_companion_auto_task(
                             task_id,
                             next_run_at=now + 60,
-                            last_error="已有闯塔命令待发送，稍后复查。",
+                            last_error="已有 MiniApp 闯塔任务，稍后复查。",
                         )
                         continue
-                    storage.enqueue_outgoing_command(
-                        profile_id=int(profile_id),
-                        chat_id=chat_id,
-                        text=pagoda_auto.COMMAND,
-                        thread_id=thread_id,
-                        chat_type=str(task.get("chat_type") or "group"),
-                        bot_username=str(task.get("bot_username") or ""),
+                    queued_payload = _update_external_payload(
+                        storage,
+                        int(profile_id),
+                        lambda latest: pagoda_state.queue_pagoda_request(
+                            latest,
+                            chat_id=chat_id,
+                            thread_id=thread_id,
+                            chat_type=str(task.get("chat_type") or "group"),
+                            bot_username=str(task.get("bot_username") or ""),
+                        ),
                     )
+                    if not pagoda_state.get_pagoda_request(queued_payload):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=now + 60,
+                            last_error="天机阁账号未连接，无法排队 MiniApp 闯塔。",
+                        )
+                        continue
                     storage.update_companion_auto_task(
                         task_id,
                         last_run_at=now,
                         next_run_at=tomorrow_run_at,
-                        workflow_state="sent_today",
+                        workflow_state="requested_today",
                         last_error=pagoda_auto.SENT_TODAY_ERROR,
                     )
                     continue
@@ -4636,6 +4984,84 @@ async def _run_companion_auto_scheduler(
                         next_run_at=tomorrow_run_at,
                         workflow_state="sent_today",
                         last_error=biz_estate_hunt_daily_auto.SENT_TODAY_ERROR,
+                    )
+                    continue
+
+                if feature_key == biz_beast_merge_daily_auto.FEATURE_KEY:
+                    chat_id = int(task.get("chat_id") or 0)
+                    if not chat_id:
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            last_error="Chat ID missing",
+                        )
+                        continue
+                    next_run_at = float(task.get("next_run_at") or 0)
+                    if next_run_at > now:
+                        continue
+                    run_time = biz_beast_merge_daily_auto.normalize_run_time(
+                        task.get("strategy")
+                    )
+                    tomorrow_run_at = biz_beast_merge_daily_auto.resolve_next_run_at(
+                        run_time,
+                        now=now,
+                        force_tomorrow=True,
+                    )
+                    latest_payload = read_cached_external_payload(storage, int(profile_id))
+                    last_run_at = float(task.get("last_run_at") or 0)
+                    if (
+                        biz_beast_merge_daily_auto.is_same_local_day(last_run_at, now)
+                        or biz_beast_merge_state.was_beast_merge_requested_today(
+                            latest_payload,
+                            now=now,
+                        )
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            last_run_at=now,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="sent_today",
+                            last_error=biz_beast_merge_daily_auto.SENT_TODAY_ERROR,
+                        )
+                        continue
+                    if biz_beast_merge_state.get_pending_beast_merge_request(latest_payload):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            last_run_at=now,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="sent_today",
+                            last_error="已有噬金虫自动请求在运行，等待明日固定时间。",
+                        )
+                        continue
+                    if biz_beast_merge_state.is_beast_merge_daily_limit_reached(latest_payload):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            last_run_at=now,
+                            next_run_at=tomorrow_run_at,
+                            workflow_state="limit_reached",
+                            last_error=biz_beast_merge_daily_auto.LIMIT_REACHED_ERROR,
+                        )
+                        continue
+                    thread_id = (
+                        int(task.get("thread_id")) if task.get("thread_id") else None
+                    )
+                    _update_external_payload(
+                        storage,
+                        int(profile_id),
+                        lambda latest: biz_beast_merge_state.queue_beast_merge_request(
+                            latest,
+                            chat_id=chat_id,
+                            thread_id=thread_id,
+                            chat_type=str(task.get("chat_type") or "group"),
+                            bot_username=str(task.get("bot_username") or ""),
+                        ),
+                    )
+                    storage.update_companion_auto_task(
+                        task_id,
+                        last_run_at=now,
+                        next_run_at=tomorrow_run_at,
+                        workflow_state="sent_today",
+                        last_error=biz_beast_merge_daily_auto.SENT_TODAY_ERROR,
                     )
                     continue
 
@@ -4984,6 +5410,91 @@ async def _run_companion_auto_scheduler(
                         next_run_at=now + ARTIFACT_TRIAL_REPLY_WAIT_SECONDS,
                         workflow_state=ARTIFACT_TRIAL_AWAIT_REPLY_STATE,
                         last_error="已发送器灵试炼，等待bot回包。",
+                    )
+                    continue
+
+                if feature_key == ARTIFACT_NURTURE_FEATURE_KEY:
+                    chat_id = int(task.get("chat_id") or 0)
+                    if not chat_id:
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            last_error="Chat ID missing",
+                        )
+                        continue
+                    target_name = _unpack_artifact_nurture_strategy(
+                        task.get("strategy") or ""
+                    )
+                    command_text = _build_artifact_nurture_command(target_name)
+                    next_run_at = float(task.get("next_run_at") or 0)
+                    workflow_state = str(task.get("workflow_state") or "").strip()
+                    if workflow_state != ARTIFACT_NURTURE_BOT_COOLDOWN_STATE and (
+                        sync_artifact_nurture_auto_from_latest_reply(
+                            storage, int(profile_id), task, now=now
+                        )
+                    ):
+                        continue
+                    if (
+                        workflow_state == ARTIFACT_NURTURE_AWAIT_REPLY_STATE
+                        and next_run_at <= now
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=now + ARTIFACT_NURTURE_DEFAULT_COOLDOWN_SECONDS,
+                            workflow_state=ARTIFACT_NURTURE_INTERNAL_WAIT_STATE,
+                            last_error="未解析到bot回包冷却，按6小时默认冷却等待下次尝试。",
+                        )
+                        continue
+                    if next_run_at > now:
+                        continue
+                    thread_id = (
+                        int(task.get("thread_id")) if task.get("thread_id") else None
+                    )
+                    fresh_payload = await asyncio.to_thread(
+                        _refresh_companion_payload, storage, int(profile_id)
+                    )
+                    if fresh_payload and isinstance(fresh_payload, dict):
+                        payload = fresh_payload
+                    resources = build_artifact_nurture_resource_state(
+                        payload,
+                        storage.get_game_items(),
+                    )
+                    if not resources.get("ok"):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            enabled=0,
+                            next_run_at=0,
+                            workflow_state=ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+                            last_error=str(resources.get("error_text") or "资源不足。"),
+                        )
+                        continue
+                    if _has_pending_outgoing_command(
+                        storage,
+                        profile_id=int(profile_id),
+                        chat_id=chat_id,
+                        text=command_text,
+                        thread_id=thread_id,
+                    ):
+                        storage.update_companion_auto_task(
+                            task_id,
+                            next_run_at=now + 60,
+                            last_error="已有温养器灵命令待发送，稍后复查。",
+                        )
+                        continue
+                    storage.enqueue_outgoing_command(
+                        profile_id=int(profile_id),
+                        chat_id=chat_id,
+                        text=command_text,
+                        thread_id=thread_id,
+                        chat_type=str(task.get("chat_type") or "group"),
+                        bot_username=str(task.get("bot_username") or ""),
+                    )
+                    storage.update_companion_auto_task(
+                        task_id,
+                        last_run_at=now,
+                        next_run_at=now + ARTIFACT_NURTURE_REPLY_WAIT_SECONDS,
+                        workflow_state=ARTIFACT_NURTURE_AWAIT_REPLY_STATE,
+                        last_error="已发送温养器灵，等待bot回包。",
                     )
                     continue
 
@@ -6062,6 +6573,11 @@ async def _run_divination_batch_scheduler(
 
     while True:
         try:
+            if profile_rebirth.is_profile_rebirth_locked(storage, int(profile_id)):
+                if run_once:
+                    return
+                await asyncio.sleep(DIVINATION_BATCH_POLL_SECONDS)
+                continue
             batch = storage.get_active_divination_batch(int(profile_id))
             if not batch:
                 if run_once:
@@ -6667,6 +7183,11 @@ async def _run_fishing_auto_scheduler(
 
     while True:
         try:
+            if profile_rebirth.is_profile_rebirth_locked(storage, int(profile_id)):
+                if run_once:
+                    return
+                await asyncio.sleep(FISHING_AUTO_POLL_SECONDS)
+                continue
             sessions = storage.list_active_fishing_sessions(int(profile_id))
             if session_ids is not None:
                 sessions = [
@@ -7022,6 +7543,10 @@ class FanrenExecutor(BaseExecutor):
                 return yy_status != "unknown"
             yy_success, yy_cd = biz_fanren_game.parse_yuanying_reply(raw_text)
             return yy_success or yy_cd is not None
+        if profile_rebirth.is_rebirth_command(parent_command):
+            return profile_rebirth.is_profile_rebirth_locked(
+                storage, context.profile.id
+            )
         last_action = str(session.get("last_action") or "").strip()
         if not last_action:
             return False
@@ -7096,6 +7621,7 @@ class FanrenExecutor(BaseExecutor):
                 if (
                     reply_text
                     and reply_text not in allowed_reply_commands
+                    and not profile_rebirth.is_rebirth_command(reply_text)
                     and not is_yuanying_settlement
                 ):
                     return False
@@ -7156,6 +7682,7 @@ class FanrenExecutor(BaseExecutor):
                 if (
                     reply_text
                     and reply_text not in fallback_allowed_reply_commands
+                    and not profile_rebirth.is_rebirth_command(reply_text)
                     and not is_yuanying_settlement
                 ):
                     return False
@@ -7404,7 +7931,12 @@ class FanrenExecutor(BaseExecutor):
                     True,
                     profile_id=context.profile.id if context.profile else None,
                 )
-                await context.reply("自动探寻裂缝已开启，CD 12 小时。")
+                cooldown_label = biz_fanren_game.get_rift_cooldown_label(
+                    storage, context.profile.id if context.profile else None
+                )
+                await context.reply(
+                    f"自动探寻裂缝已开启，当前基础 CD {cooldown_label}，bot 回包倒计时优先。"
+                )
                 return True
             if rift_action == "off":
                 biz_fanren_game.set_auto_rift(
@@ -8045,6 +8577,11 @@ class GeneralGameExecutor(BaseExecutor):
                         and parsed.get("event") == "artifact_trial"
                     ):
                         self._maybe_reschedule_artifact_trial(context, storage, parsed)
+                    if (
+                        module_key == "artifact"
+                        and parsed.get("event") == "artifact_nurture"
+                    ):
+                        self._maybe_reschedule_artifact_nurture(context, storage, parsed)
                     if module_key == "estate":
                         _record_estate_miniapp_payload(context, storage)
                     return True
@@ -8096,6 +8633,33 @@ class GeneralGameExecutor(BaseExecutor):
         ):
             return
         reschedule_artifact_trial_auto_on_reply(
+            storage,
+            profile_id=context.profile.id,
+            chat_id=context.chat_id,
+            reply_to_msg_id=int(context.reply_to_msg_id or 0),
+            reply_text=context.text,
+            now=time.time(),
+        )
+
+
+    def _maybe_reschedule_artifact_nurture(
+        self, context: EventContext, storage: Storage, parsed: dict
+    ) -> None:
+        if not context.profile or context.chat_id is None:
+            return
+        task = storage.get_companion_auto_task(
+            context.profile.id,
+            context.chat_id,
+            ARTIFACT_NURTURE_FEATURE_KEY,
+        )
+        if not task or not bool(task.get("enabled")):
+            return
+        task_thread_id = task.get("thread_id")
+        if task_thread_id and (
+            not context.thread_id or int(task_thread_id) != int(context.thread_id)
+        ):
+            return
+        reschedule_artifact_nurture_auto_on_reply(
             storage,
             profile_id=context.profile.id,
             chat_id=context.chat_id,

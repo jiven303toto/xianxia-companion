@@ -6,6 +6,7 @@ ACTION_KEYWORDS = {
     "artifact_repair": ["修理", "一键修理"],
     "artifact_touch": ["抚摸法宝", "器灵经验"],
     "artifact_trial": ["器灵试炼", "试炼消耗"],
+    "artifact_nurture": ["温养器灵"],
     "artifact_awaken": ["唤醒器灵", "器灵"],
     "artifact_spirit": ["我的器灵", "器灵信息"],
 }
@@ -80,6 +81,22 @@ def _is_artifact_trial_insufficient(text):
     )
 
 
+def _is_artifact_nurture_text(text):
+    return any(
+        keyword in (text or "")
+        for keyword in (
+            "【温养器灵】",
+            "温养器灵需要",
+            "后再行温养",
+        )
+    )
+
+
+def _is_artifact_nurture_insufficient(text):
+    normalized = text or ""
+    return "温养器灵需要" in normalized and "当前尚缺" in normalized
+
+
 def _build_artifact_action_result(event_name, text):
     summary = f"收到法宝消息: {event_name}"
     if any(keyword in text for keyword in SUCCESS_KEYWORDS):
@@ -94,6 +111,9 @@ def _build_artifact_action_result(event_name, text):
     if event_name == "artifact_trial":
         result["cooldown_seconds"] = _parse_artifact_trial_cooldown_seconds(text)
         result["insufficient_resources"] = _is_artifact_trial_insufficient(text)
+    if event_name == "artifact_nurture":
+        result["cooldown_seconds"] = _parse_cooldown_seconds(text)
+        result["insufficient_resources"] = _is_artifact_nurture_insufficient(text)
     return result
 
 
@@ -101,6 +121,8 @@ def parse_message(text):
     text = (text or "").strip()
     if not text:
         return None
+    if _is_artifact_nurture_text(text):
+        return _build_artifact_action_result("artifact_nurture", text)
     if _is_artifact_trial_text(text):
         return _build_artifact_action_result("artifact_trial", text)
     if "后再与它互动" in text and _parse_cooldown_seconds(text):

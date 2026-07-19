@@ -12,10 +12,12 @@
         </div>
         <div class="stack-list compact-stack">
             <div class="kv-row"><span>最高层</span><strong>{{ other_play_state.pagoda.highest_floor_text }}</strong></div>
+            <div class="kv-row"><span>今日最高</span><strong>{{ (other_play_state.pagoda.today_highest ~ ' 层') if other_play_state.pagoda.today_highest else '-' }}</strong></div>
+            <div class="kv-row"><span>累计塔印</span><strong>{{ other_play_state.pagoda.tower_marks or '-' }}</strong></div>
             <div class="kv-row"><span>今日闯塔</span><strong>{{ '是' if other_play_state.pagoda.attempted_today else '否' }}</strong></div>
             <div class="kv-row"><span>今日重置</span><strong>{{ other_play_state.pagoda.resets_today }} 次</strong></div>
             <div class="kv-row"><span>失败层数</span><strong>{{ other_play_state.pagoda.failed_floor or '-' }}</strong></div>
-            <div class="kv-row"><span>是否塔内</span><strong>{{ '是' if other_play_state.pagoda.is_in_pagoda else '否' }}</strong></div>
+            <div class="kv-row"><span>MiniApp 状态</span><strong>{{ other_play_state.pagoda.miniapp_status_label }}</strong></div>
             <div class="kv-row"><span>今日执行</span><strong>{{ pagoda_today_state.attempt_count }} 次（成功 {{ pagoda_today_state.success_count }} / 失败 {{ pagoda_today_state.failed_count }} / 无回包 {{ pagoda_today_state.no_reply_count }}）</strong></div>
             <div class="kv-row"><span>最近结算</span><strong>{{ pagoda_today_state.latest_time_display }} · {{ pagoda_today_state.latest_status }} · {{ pagoda_today_state.floor_text }}</strong></div>
         </div>
@@ -26,14 +28,13 @@
             </div>
         {% endif %}
         <div class="action-row top-gap" style="align-items: end;">
-            <form method="post" action="/runtime/commands/send-raw">
+            <form method="post" action="/runtime/pagoda/miniapp-run">
                 <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
                 <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
                 <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
                 <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
                 <input type="hidden" name="redirect_to" value="/modules/other">
-                <input type="hidden" name="text" value=".闯塔">
-                <button type="submit" {% if not command_chat_ready %}disabled{% endif %}>进入古塔</button>
+                <button type="submit" {% if not command_chat_ready or other_play_state.pagoda.miniapp_active %}disabled{% endif %}>{{ '正在闯塔' if other_play_state.pagoda.miniapp_active else 'MiniApp 一念登塔' }}</button>
             </form>
             {% if not global_execution_managed.pagoda %}
             <form method="post" action="/runtime/commands/pagoda-auto" class="action-row" style="gap: 8px; align-items: end;">
@@ -57,6 +58,10 @@
         {% elif pagoda_auto_state.last_error %}
             <p class="muted top-gap">自动闯塔：{{ pagoda_auto_state.last_error }}</p>
         {% endif %}
+        {% if other_play_state.pagoda.miniapp_error %}
+            <p class="muted top-gap">最近说明：{{ other_play_state.pagoda.miniapp_error }}</p>
+        {% endif %}
+        <p class="muted top-gap">自动化只执行服务端 `start → challenge`，不会自动“重铸道心”消耗重置成本，也不会发送 `.闯塔` 群命令。</p>
     </div>
 
     <div class="detail-card wild-experience-card">
@@ -119,12 +124,12 @@
             <h2>自动探寻裂缝</h2>
         </div>
         <div class="stack-list compact-stack top-gap">
-            <div class="kv-row"><span>CD</span><strong>12 小时</strong></div>
+            <div class="kv-row"><span>基础 CD</span><strong>{{ rift_cooldown_label }}</strong></div>
             <div class="kv-row"><span>状态</span><strong style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ cultivation_session.rift_state if cultivation_session else '' }}">{{ cultivation_session.rift_state if cultivation_session else '-' }}</strong></div>
             <div class="kv-row"><span>下次执行</span><strong {% if cultivation_session and cultivation_session.rift_next_check_time %}class="countdown-text" data-countdown-target="{{ cultivation_session.rift_next_check_time }}"{% endif %}>{{ format_timestamp(cultivation_session.rift_next_check_time) if cultivation_session and cultivation_session.rift_next_check_time else '立即执行' }}</strong></div>
             <div class="kv-row"><span>重试次数</span><strong>{{ (cultivation_session.rift_retry_count or 0) if cultivation_session else 0 }} / 1</strong></div>
         </div>
-        <p class="muted top-gap">CD 12 小时，发送指令 .探寻裂缝。失败自动重试一次。</p>
+        <p class="muted top-gap">发送指令 .探寻裂缝。bot 回包倒计时优先；成功回包无倒计时时，风雷翅按 9 小时、普通角色按 12 小时计算。失败自动重试一次。</p>
         <div class="action-row top-gap">
             <button type="submit" class="inline-button auto-toggle-button{% if cultivation_session and cultivation_session.auto_rift_enabled %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '关闭自动探寻裂缝' if cultivation_session and cultivation_session.auto_rift_enabled else '开启自动探寻裂缝' }}</button>
         </div>
@@ -185,14 +190,16 @@
     {% if artifact_module_available %}
     {% set artifact_touch_command_text = artifact_touch_auto_state.command_text or '' %}
     {% set artifact_trial_default = artifact_touch_command_text.replace('.抚摸法宝', '').strip() or '玄天斩灵剑' %}
+    {% set artifact_nurture_default = artifact_nurture_auto_state.target_name or artifact_trial_auto_state.artifact_name or artifact_trial_default %}
     <div class="detail-card" data-artifact-tabs data-partial-refresh-card="artifact-spirit">
         <div class="section-header compact">
-            <p>定时抚摸 / 器灵试炼</p>
+            <p>定时抚摸 / 器灵试炼 / 温养器灵</p>
             <h2>法宝器灵</h2>
         </div>
         <div class="artifact-card-tab-row" role="tablist" aria-label="法宝器灵操作">
             <button type="button" class="inline-button artifact-card-tab active" data-artifact-tab-target="touch" role="tab" aria-selected="true">定时抚摸</button>
             <button type="button" class="inline-button artifact-card-tab" data-artifact-tab-target="trial" role="tab" aria-selected="false">器灵试炼</button>
+            <button type="button" class="inline-button artifact-card-tab" data-artifact-tab-target="nurture" role="tab" aria-selected="false">温养器灵</button>
         </div>
         <div data-artifact-tab-panel="touch">
             <div class="stack-list compact-stack">
@@ -256,6 +263,32 @@
             <p class="muted top-gap">启动前检查灵石和养魂木；发送后只使用当前 profile 自己命令对应的 bot 回包更新冷却。</p>
             {% if artifact_trial_auto_state.last_error %}
             <p class="muted top-gap">{{ artifact_trial_auto_state.last_error }}</p>
+            {% endif %}
+        </div>
+        <div data-artifact-tab-panel="nurture" hidden>
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>状态</span><strong style="color: {% if artifact_nurture_auto_state.active %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ '运行中' if artifact_nurture_auto_state.active else '未启动' }}</strong></div>
+                <div class="kv-row"><span>下次执行</span><strong {% if artifact_nurture_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ artifact_nurture_auto_state.next_run_target }}"{% endif %}>{{ artifact_nurture_auto_state.next_run_display }}</strong></div>
+                <div class="kv-row"><span>灵石</span><strong>{{ artifact_nurture_auto_state.resources.spirit_stones }} / {{ artifact_nurture_auto_state.resources.spirit_stone_cost }}</strong></div>
+                <div class="kv-row"><span>养魂木</span><strong>{{ artifact_nurture_auto_state.resources.soul_wood }} / {{ artifact_nurture_auto_state.resources.soul_wood_cost }}</strong></div>
+            </div>
+            <form class="form-grid top-gap" method="post" action="/runtime/artifact/nurture-auto" data-partial-card-refresh data-loading-message="{{ '正在停止自动温养器灵' if artifact_nurture_auto_state.active else '正在开启自动温养器灵' }}">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/other">
+                <label class="full-span">
+                    法宝或器灵名
+                    <input name="target_name" value="{{ artifact_nurture_default }}" placeholder="玄天斩灵剑" {% if artifact_nurture_auto_state.active %}readonly{% endif %} required>
+                </label>
+                <div class="action-row" style="align-items: end;">
+                    <button type="submit" class="inline-button auto-toggle-button{% if artifact_nurture_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动温养' if artifact_nurture_auto_state.active else '开启自动温养' }}</button>
+                </div>
+            </form>
+            <p class="muted top-gap">启动前检查灵石 3000 和养魂木 3；成功后按 6 小时冷却，只接受当前 profile 自己命令对应的 bot 回包。</p>
+            {% if artifact_nurture_auto_state.last_error %}
+            <p class="muted top-gap">{{ artifact_nurture_auto_state.last_error }}</p>
             {% endif %}
         </div>
     </div>
@@ -851,6 +884,79 @@
             {% endif %}
         </div>
     </section>
+</section>
+
+<section class="detail-grid beast-merge-panel" id="beast-merge-panel">
+    <div class="detail-card beast-merge-card">
+        <div class="section-header compact">
+            <p>公共洞府 · 噬金虫进化</p>
+            <h2>虫巢全自动</h2>
+        </div>
+        <div class="beast-merge-layout">
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>执行状态</span><strong>{{ beast_merge_state.status_label }}</strong></div>
+                <div class="kv-row"><span>挑战日期</span><strong>{{ beast_merge_state.challenge_date }}</strong></div>
+                <div class="kv-row"><span>今日局数</span><strong>{{ beast_merge_state.attempts_text }}</strong></div>
+                <div class="kv-row"><span>本次完成</span><strong>{{ beast_merge_state.completed_runs }} 局</strong></div>
+                <div class="kv-row"><span>当前步数</span><strong>{{ beast_merge_state.current_moves }}/{{ beast_merge_state.service_max_moves_text }}</strong></div>
+                <div class="kv-row"><span>当前分数</span><strong>{{ beast_merge_state.current_score }}</strong></div>
+                <div class="kv-row"><span>当前阶位</span><strong>{{ beast_merge_state.current_tier }}</strong></div>
+                <div class="kv-row"><span>合并 / 空格</span><strong>{{ beast_merge_state.current_merges }} / {{ beast_merge_state.current_empty }}</strong></div>
+            </div>
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>求解策略</span><strong>Expectimax 深度 {{ beast_merge_state.solver_depth }}</strong></div>
+                <div class="kv-row"><span>线上步数上限</span><strong>动态读取 {{ beast_merge_state.service_max_moves_text }} 步</strong></div>
+                <div class="kv-row"><span>200 步成果</span><strong>离线稳定走满 {{ beast_merge_state.offline_verified_moves }} 步</strong></div>
+                <div class="kv-row"><span>最佳分数</span><strong>{{ beast_merge_state.best_score }}</strong></div>
+                <div class="kv-row"><span>最佳阶位</span><strong>{{ beast_merge_state.best_tier }}</strong></div>
+                <div class="kv-row"><span>本次残痕 / 余额</span><strong>+{{ beast_merge_state.total_trace }} / {{ beast_merge_state.trace_balance }}</strong></div>
+                <div class="kv-row"><span>当前排名</span><strong>{{ beast_merge_state.rank or '-' }}{% if beast_merge_state.participants %} / {{ beast_merge_state.participants }}{% endif %}</strong></div>
+                <div class="kv-row"><span>更新时间</span><strong>{{ beast_merge_state.updated_at }}</strong></div>
+            </div>
+        </div>
+
+        <div class="beast-merge-actions top-gap">
+            <form method="post" action="/runtime/beast-merge/auto">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/other">
+                <button type="submit" class="inline-button auto-toggle-button{% if beast_merge_state.active %} active{% endif %}" {% if not command_chat_ready or beast_merge_state.manual_disabled %}disabled{% endif %}>{{ beast_merge_state.manual_label }}</button>
+            </form>
+            {% if not global_execution_managed.beast_merge %}
+            <form class="beast-merge-daily-form" method="post" action="/runtime/beast-merge/daily-auto">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/other">
+                <label class="tianji-trial-time-control">
+                    <span>每日时间</span>
+                    <input type="time" name="run_time" value="{{ beast_merge_state.daily_run_time }}" {% if beast_merge_state.daily_auto_enabled or not command_chat_ready %}disabled{% endif %}>
+                </label>
+                <button type="submit" class="inline-button auto-toggle-button{% if beast_merge_state.daily_auto_enabled %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止每日噬金虫' if beast_merge_state.daily_auto_enabled else '开启每日噬金虫' }}</button>
+            </form>
+            {% endif %}
+        </div>
+        {% if global_execution_managed.beast_merge %}
+        <p class="muted top-gap">每日噬金虫进化：已由“诸元神巡令”统一托管</p>
+        {% elif beast_merge_state.daily_auto_enabled %}
+        <p class="muted top-gap">每日自动：<span {% if beast_merge_state.daily_next_run_at %}class="countdown-text" data-countdown-target="{{ beast_merge_state.daily_next_run_at }}"{% endif %}>{{ beast_merge_state.daily_status }}</span></p>
+        {% elif beast_merge_state.daily_status != '未开启' %}
+        <p class="muted top-gap">每日自动：{{ beast_merge_state.daily_status }}</p>
+        {% endif %}
+        <p class="muted top-gap">线上当前服务端已确认上限为 160 步；求解器不硬编码步数，服务端提升到 200 时会自动按 200 步执行。点击开局后会立即消耗一次今日次数。</p>
+        <p class="muted">{{ beast_merge_state.safety_boundary }}</p>
+        {% if beast_merge_state.error %}<p class="muted">错误：{{ beast_merge_state.error }}</p>{% endif %}
+        {% if beast_merge_state.rounds %}
+        <div class="stack-list compact-stack top-gap">
+            {% for round in beast_merge_state.rounds %}
+            <div class="kv-row"><span>第 {{ round.number }} 局 · {{ round.moves_count }} 步 · 残痕 +{{ round.trace_reward }}</span><strong>{{ round.score }} 分 / {{ round.max_tier }} 阶{% if round.rank %} / 第 {{ round.rank }} 名{% endif %}</strong></div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
 </section>
 
 <script>

@@ -5,24 +5,27 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from tg_game import pagoda_auto
+from tg_game.features.beast_merge import biz_beast_merge_daily_auto
+from tg_game.features.beast_merge import biz_beast_merge_state
 from tg_game.features.estate import biz_estate_hunt_daily_auto
 from tg_game.features.estate.biz_estate_miniapp import (
     is_estate_miniapp_hunt_limit_reached,
     mark_estate_miniapp_hunt_limit_reached,
     queue_estate_miniapp_hunt_request,
 )
+from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.tianji_trial import queue_tianji_trial_request
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
-from tg_game.storage import OUTGOING_CONFIRM_TIMEOUT_SECONDS, Storage
+from tg_game.storage import Storage
 
 
 STATE_KEY = "admin_global_execution"
 DEFAULT_BOT_USERNAME = "fanrenxiuxian_bot"
-PAGODA_COMMAND = ".闯塔"
-PAGODA_PROFILE_INTERVAL_SECONDS = 15
+PAGODA_COMMAND = pagoda_auto.COMMAND
 BATCH_TIMEOUT_SECONDS = 15 * 60
+PAGODA_BATCH_TIMEOUT_SECONDS = 30 * 60
+BEAST_MERGE_BATCH_TIMEOUT_SECONDS = 30 * 60
 TERMINAL_STATUSES = {"success", "failed", "skipped"}
-ACTIVE_OUTGOING_STATUSES = {"pending", "sending", "awaiting_confirm"}
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 SCHEDULE_POLL_SECONDS = 15
 
@@ -44,6 +47,12 @@ TASKS = {
         "button": "敕令诸元神·古塔问道",
         "feature_key": pagoda_auto.FEATURE_KEY,
         "default_run_time": pagoda_auto.DEFAULT_RUN_TIME,
+    },
+    "beast_merge": {
+        "title": "噬金虫进化",
+        "button": "敕令诸元神·噬金虫进化",
+        "feature_key": biz_beast_merge_daily_auto.FEATURE_KEY,
+        "default_run_time": biz_beast_merge_daily_auto.DEFAULT_RUN_TIME,
     },
 }
 
@@ -155,6 +164,7 @@ def _new_item(profile, target: dict, now: float) -> dict:
         "thread_id": target.get("thread_id"),
         "command_id": 0,
         "scheduled_at": 0,
+        "phase": "waiting_previous",
     }
 
 
@@ -200,37 +210,20 @@ def _tianji_completed_today(payload: dict, now: float | None = None) -> bool:
     return updated_at[:10] == _day_key(now)
 
 
-def _pagoda_succeeded_today(
-    storage: Storage,
-    profile_id: int,
-    chat_id: int,
-    *,
-    now: float | None = None,
-) -> bool:
-    current = _local_now(now)
-    day_start = current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    messages = storage.list_bound_messages(
-        profile_id=int(profile_id),
-        chat_id=int(chat_id),
-        search_query=PAGODA_COMMAND,
-        limit=500,
+def _tianji_reward(payload: dict) -> str:
+    trial = (
+        payload.get("tianji_trial")
+        if isinstance(payload.get("tianji_trial"), dict)
+        else {}
     )
-    for command in messages:
-        if (
-            str(command.get("direction") or "") != "outgoing"
-            or str(command.get("text") or "").strip() != PAGODA_COMMAND
-            or float(command.get("created_at") or 0) < day_start
-        ):
-            continue
-        reply = storage.get_latest_bot_reply_message(
-            int(chat_id),
-            int(command.get("message_id") or 0),
-            int(profile_id),
-        )
-        reply_text = str((reply or {}).get("text") or "")
-        if reply_text and "今日已挑战失败" not in reply_text:
-            return True
-    return False
+    run = trial.get("miniapp_run") if isinstance(trial.get("miniapp_run"), dict) else {}
+    reward = int(run.get("reward_trace") or 0)
+    return f"残痕 +{reward}" if reward else "—"
+
+
+def _pagoda_reward(payload: dict) -> str:
+    reward_lines = pagoda_state.build_pagoda_miniapp_view(payload).get("reward_lines") or []
+    return "、".join(str(line) for line in reward_lines if str(line).strip()) or "—"
 
 
 def _start_estate_item(storage: Storage, profile, item: dict) -> None:
@@ -253,13 +246,24 @@ def _start_estate_item(storage: Storage, profile, item: dict) -> None:
             bot_username=item["bot_username"],
         )
 
-    storage.update_external_account_payload(
+    updated_payload = storage.update_external_account_payload(
         int(profile.id),
         "asc_aiopenai",
         queue_request,
     )
     if limit_reached:
         item["status"] = "skipped"
+        dongfu = (
+            updated_payload.get("dongfu")
+            if isinstance(updated_payload.get("dongfu"), dict)
+            else {}
+        )
+        hunt = (
+            dongfu.get("miniapp_hunt")
+            if isinstance(dongfu.get("miniapp_hunt"), dict)
+            else {}
+        )
+        item["reward"] = _estate_reward(hunt)
 
 
 def _start_tianji_item(storage: Storage, profile, item: dict) -> None:
@@ -282,58 +286,103 @@ def _start_tianji_item(storage: Storage, profile, item: dict) -> None:
             bot_username=item["bot_username"],
         )
 
-    storage.update_external_account_payload(
+    updated_payload = storage.update_external_account_payload(
         int(profile.id),
         "asc_aiopenai",
         queue_request,
     )
     if completed_today:
         item["status"] = "skipped"
+        item["reward"] = _tianji_reward(updated_payload)
 
 
 def _start_pagoda_item(
     storage: Storage,
     profile,
     item: dict,
-    *,
-    delay_seconds: int,
 ) -> None:
-    account, _payload = _load_external(storage, profile.id)
-    if not _profile_ready(
-        profile,
-        account,
-        item,
-        require_external_account=False,
-    ):
+    item["scheduled_at"] = time.time()
+    item["phase"] = "queued"
+    account, payload = _load_external(storage, profile.id)
+    if not _profile_ready(profile, account, item):
         item["status"] = "failed"
         return
-    if _pagoda_succeeded_today(
-        storage,
-        profile.id,
-        item["chat_id"],
+    completed_today = pagoda_state.was_pagoda_completed_today(payload)
+    if completed_today or pagoda_auto.attempted_today_from_payload(
+        payload,
+        now=time.time(),
     ):
         item["status"] = "skipped"
+        if completed_today:
+            item["reward"] = _pagoda_reward(payload)
         return
-    latest = storage.get_latest_outgoing_command(
-        item["chat_id"],
-        profile_id=profile.id,
+    storage.cancel_pending_outgoing_commands(
+        int(profile.id),
+        int(item["chat_id"]),
         text=PAGODA_COMMAND,
         thread_id=item["thread_id"],
+        require_exact_thread=True,
     )
-    if latest and str(latest.get("status") or "") in ACTIVE_OUTGOING_STATUSES:
-        item["command_id"] = int(latest["id"])
-        item["scheduled_at"] = float(latest.get("scheduled_at") or 0)
+    queued_payload = storage.update_external_account_payload(
+        int(profile.id),
+        "asc_aiopenai",
+        lambda latest: pagoda_state.queue_pagoda_request(
+            latest,
+            chat_id=item["chat_id"],
+            thread_id=item["thread_id"],
+            chat_type=item["chat_type"],
+            bot_username=item["bot_username"],
+        ),
+    )
+    if not pagoda_state.has_active_pagoda_request(queued_payload):
+        item["status"] = "failed"
         return
-    item["command_id"] = storage.enqueue_outgoing_command(
-        profile_id=profile.id,
-        chat_id=item["chat_id"],
-        text=PAGODA_COMMAND,
-        thread_id=item["thread_id"],
-        chat_type=item["chat_type"],
-        bot_username=item["bot_username"],
-        delay_seconds=delay_seconds,
+
+
+def _dispatch_next_pagoda_item(storage: Storage, items: list[dict]) -> None:
+    for item in items:
+        if item.get("status") in TERMINAL_STATUSES:
+            continue
+        if float(item.get("scheduled_at") or 0) > 0:
+            return
+        profile = storage.get_profile(int(item.get("profile_id") or 0))
+        if profile is None:
+            item["status"] = "failed"
+            item["scheduled_at"] = time.time()
+            continue
+        _start_pagoda_item(storage, profile, item)
+        if item.get("status") not in TERMINAL_STATUSES:
+            return
+
+
+def _start_beast_merge_item(storage: Storage, profile, item: dict) -> None:
+    account, _payload = _load_external(storage, profile.id)
+    if not _profile_ready(profile, account, item):
+        item["status"] = "failed"
+        return
+    limit_reached = False
+
+    def queue_request(latest: dict) -> dict:
+        nonlocal limit_reached
+        if biz_beast_merge_state.is_beast_merge_daily_limit_reached(latest):
+            limit_reached = True
+            return latest
+        return biz_beast_merge_state.queue_beast_merge_request(
+            latest,
+            chat_id=item["chat_id"],
+            thread_id=item["thread_id"],
+            chat_type=item["chat_type"],
+            bot_username=item["bot_username"],
+        )
+
+    updated_payload = storage.update_external_account_payload(
+        int(profile.id),
+        "asc_aiopenai",
+        queue_request,
     )
-    item["scheduled_at"] = item["queued_at"] + delay_seconds
+    if limit_reached:
+        item["status"] = "skipped"
+        item["reward"] = _beast_merge_reward(updated_payload)
 
 
 def start_batch(
@@ -354,7 +403,7 @@ def start_batch(
 
     now = time.time()
     items = []
-    for index, profile in enumerate(sorted(profiles, key=lambda value: int(value.id))):
+    for profile in sorted(profiles, key=lambda value: int(value.id)):
         target = _target_for_profile(
             storage,
             profile.id,
@@ -369,14 +418,12 @@ def start_batch(
             _start_estate_item(storage, profile, item)
         elif kind == "tianji":
             _start_tianji_item(storage, profile, item)
-        else:
-            _start_pagoda_item(
-                storage,
-                profile,
-                item,
-                delay_seconds=index * PAGODA_PROFILE_INTERVAL_SECONDS,
-            )
+        elif kind == "beast_merge":
+            _start_beast_merge_item(storage, profile, item)
         items.append(item)
+
+    if kind == "pagoda":
+        _dispatch_next_pagoda_item(storage, items)
 
     batch = {
         "id": uuid.uuid4().hex,
@@ -487,7 +534,7 @@ def run_due_schedule(
     current = _local_now(now)
     today = current.date().isoformat()
     current_time = current.strftime("%H:%M")
-    for kind in ("estate", "tianji", "pagoda"):
+    for kind in ("estate", "tianji", "pagoda", "beast_merge"):
         schedule = state["schedules"][kind]
         if not schedule.get("enabled"):
             continue
@@ -529,6 +576,37 @@ def _estate_reward(hunt: dict) -> str:
     return "、".join(parts) or "—"
 
 
+def _beast_merge_reward(payload: dict) -> str:
+    beast_merge = (
+        payload.get("beast_merge")
+        if isinstance(payload.get("beast_merge"), dict)
+        else {}
+    )
+    run = beast_merge.get("run") if isinstance(beast_merge.get("run"), dict) else {}
+    rounds = run.get("runs") if isinstance(run.get("runs"), list) else []
+    trace_reward = sum(
+        max(0, int(round_result.get("trace_reward") or 0))
+        for round_result in rounds
+        if isinstance(round_result, dict)
+    )
+    best_score = max(
+        [
+            max(0, int(run.get("best_score") or 0)),
+            *[
+                max(0, int(round_result.get("score") or 0))
+                for round_result in rounds
+                if isinstance(round_result, dict)
+            ],
+        ]
+    )
+    reward = []
+    if trace_reward:
+        reward.append(f"残痕 +{trace_reward}")
+    if best_score:
+        reward.append(f"最佳 {best_score} 分")
+    return "、".join(reward) or "—"
+
+
 def _refresh_estate_item(storage: Storage, item: dict) -> None:
     _account, payload = _load_external(storage, item["profile_id"])
     dongfu = payload.get("dongfu") if isinstance(payload.get("dongfu"), dict) else {}
@@ -551,6 +629,7 @@ def _refresh_estate_item(storage: Storage, item: dict) -> None:
         return
     if status == "limit_reached":
         item["status"] = "skipped"
+        item["reward"] = _estate_reward(hunt)
         return
     if status == "failed":
         item["status"] = "failed"
@@ -585,7 +664,7 @@ def _refresh_tianji_item(storage: Storage, item: dict) -> None:
     reward = int(run.get("reward_trace") or 0)
     if status == "settled" or bool(run.get("ok")):
         item["status"] = "success" if completed or reward else "skipped"
-        item["reward"] = f"残痕 +{reward}" if reward else "—"
+        item["reward"] = _tianji_reward(payload)
         return
     if status and status not in {"idle", "queued"}:
         item["status"] = (
@@ -595,91 +674,78 @@ def _refresh_tianji_item(storage: Storage, item: dict) -> None:
         )
 
 
-def _pagoda_reply(storage: Storage, item: dict) -> dict:
-    queued_at = float(item.get("queued_at") or 0)
-    messages = storage.list_bound_messages(
-        profile_id=item["profile_id"],
-        chat_id=item["chat_id"],
-        search_query=PAGODA_COMMAND,
-        limit=50,
+def _refresh_beast_merge_item(storage: Storage, item: dict) -> None:
+    _account, payload = _load_external(storage, item["profile_id"])
+    beast_merge = (
+        payload.get("beast_merge")
+        if isinstance(payload.get("beast_merge"), dict)
+        else {}
     )
-    command = next(
-        (
-            message
-            for message in messages
-            if str(message.get("direction") or "") == "outgoing"
-            and str(message.get("text") or "").strip() == PAGODA_COMMAND
-            and float(message.get("created_at") or 0) >= queued_at - 1
-        ),
-        None,
+    request = (
+        beast_merge.get("request")
+        if isinstance(beast_merge.get("request"), dict)
+        else {}
     )
-    if not command:
-        return {}
-    return storage.get_latest_bot_reply_message(
-        item["chat_id"],
-        int(command.get("message_id") or 0),
-        item["profile_id"],
-    ) or {}
+    run = beast_merge.get("run") if isinstance(beast_merge.get("run"), dict) else {}
+    request_status = str(request.get("status") or "").strip()
+    if request_status in {"queued", "resolving", "running"}:
+        item["status"] = request_status
+        return
 
+    status = str(run.get("status") or "").strip()
+    if request_status in {"failed", "interrupted"} or status in {
+        "failed",
+        "interrupted",
+    }:
+        item["status"] = "failed"
+        return
+    if request_status != "completed" and status != "completed":
+        return
 
-def _pagoda_reward(reply_text: str) -> str:
-    lines = []
-    for line in str(reply_text or "").splitlines():
-        normalized = line.strip().lstrip("- ").strip()
-        if normalized.startswith(("修为 ", "宗门贡献", "获得了", "威望 ")):
-            lines.append(normalized)
-    return "、".join(lines) or "—"
+    completed = int(run.get("completed_runs") or 0)
+    item["status"] = "success" if completed > 0 else "skipped"
+    item["reward"] = _beast_merge_reward(payload)
 
 
 def _refresh_pagoda_item(storage: Storage, item: dict) -> None:
-    command = storage.get_outgoing_command(int(item.get("command_id") or 0))
-    if not command:
+    _account, payload = _load_external(storage, int(item["profile_id"]))
+    request = pagoda_state.get_pagoda_request(payload)
+    request_status = str(request.get("status") or "")
+    if request_status in {"queued", "resolving", "running"}:
+        item["status"] = request_status
+        item["phase"] = str(request.get("phase") or request_status)
+        return
+    root = payload.get("pagoda_miniapp") if isinstance(payload.get("pagoda_miniapp"), dict) else {}
+    run = root.get("run") if isinstance(root.get("run"), dict) else {}
+    status = str(run.get("status") or "")
+    item["phase"] = str(run.get("phase") or status)
+    if status in {"failed", "interrupted"}:
         item["status"] = "failed"
         return
-    status = str(command.get("status") or "").strip()
-    if status in ACTIVE_OUTGOING_STATUSES:
-        item["status"] = "running"
+    if status == "skipped":
+        item["status"] = "skipped"
+        item["reward"] = _pagoda_reward(payload)
         return
-    if status in {"failed", "needs_manual_confirm"}:
-        item["status"] = "failed"
+    if status != "settled":
         return
-    if status in {"confirmed", "sent"}:
-        reply = _pagoda_reply(storage, item)
-        reply_text = str(reply.get("text") or "")
-        item["status"] = "failed" if "今日已挑战失败" in reply_text else "success"
-        item["reward"] = _pagoda_reward(reply_text)
-
-
-def _backfill_pagoda_rewards(storage: Storage, state: dict) -> bool:
-    batch = state.get("batches", {}).get("pagoda")
-    if not isinstance(batch, dict):
-        return False
-    changed = False
-    for item in batch.get("items") or []:
-        if item.get("status") != "success" or str(item.get("reward") or "—") != "—":
-            continue
-        reply = _pagoda_reply(storage, item)
-        reward = _pagoda_reward(reply.get("text") or "")
-        if reward == "—":
-            continue
-        item["reward"] = reward
-        changed = True
-    return changed
+    item["status"] = "success"
+    item["reward"] = _pagoda_reward(payload)
 
 
 def refresh_state(storage: Storage) -> dict:
     state = _load_state(storage)
-    pagoda_reward_updated = _backfill_pagoda_rewards(storage, state)
     active_kind = state.get("active_kind")
     batch = state["batches"].get(active_kind) if active_kind else None
     if not isinstance(batch, dict) or batch.get("status") != "running":
         state["active_kind"] = ""
-        if pagoda_reward_updated:
-            _save_state(storage, state)
         return state
 
     now = time.time()
-    timed_out = now - float(batch.get("started_at") or 0) >= BATCH_TIMEOUT_SECONDS
+    timeout_seconds = {
+        "beast_merge": BEAST_MERGE_BATCH_TIMEOUT_SECONDS,
+        "pagoda": PAGODA_BATCH_TIMEOUT_SECONDS,
+    }.get(active_kind, BATCH_TIMEOUT_SECONDS)
+    timed_out = now - float(batch.get("started_at") or 0) >= timeout_seconds
     for item in batch.get("items") or []:
         if item.get("status") in TERMINAL_STATUSES:
             continue
@@ -690,8 +756,15 @@ def refresh_state(storage: Storage) -> dict:
             _refresh_estate_item(storage, item)
         elif active_kind == "tianji":
             _refresh_tianji_item(storage, item)
-        else:
+        elif active_kind == "pagoda":
+            if not float(item.get("scheduled_at") or 0):
+                continue
             _refresh_pagoda_item(storage, item)
+        else:
+            _refresh_beast_merge_item(storage, item)
+
+    if active_kind == "pagoda" and not timed_out:
+        _dispatch_next_pagoda_item(storage, batch.get("items") or [])
 
     if all(
         item.get("status") in TERMINAL_STATUSES
@@ -751,26 +824,40 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
     items = []
     for item in raw_items:
         status = str(item.get("status") or "queued")
+        phase = str(item.get("phase") or "")
+        status_label = {
+            "queued": (
+                "等待入口"
+                if kind in {"estate", "tianji", "pagoda", "beast_merge"}
+                else "等待发送"
+            ),
+            "resolving": "获取入口",
+            "running": (
+                "正在寻宝"
+                if kind == "estate"
+                else "正在试炼"
+                if kind == "tianji"
+                else "正在闯塔"
+                if kind == "pagoda"
+                else "正在进化"
+                if kind == "beast_merge"
+                else "执行中"
+            ),
+            "success": "成功",
+            "failed": "失败",
+            "skipped": "无需执行",
+        }.get(status, "等待执行")
+        if kind == "pagoda" and status == "queued" and phase == "waiting_previous":
+            status_label = "等待前序元神"
+        elif kind == "pagoda" and status == "running" and phase == "start":
+            status_label = "读取塔况（start）"
+        elif kind == "pagoda" and status == "running" and phase == "challenge":
+            status_label = "服务端结算（challenge）"
         items.append(
             {
                 "profile_name": item.get("profile_name") or f"Profile {item.get('profile_id')}",
                 "status": status,
-                "status_label": {
-                    "queued": (
-                        "等待入口" if kind in {"estate", "tianji"} else "等待发送"
-                    ),
-                    "resolving": "获取入口",
-                    "running": (
-                        "正在寻宝"
-                        if kind == "estate"
-                        else "正在试炼"
-                        if kind == "tianji"
-                        else "执行中"
-                    ),
-                    "success": "成功",
-                    "failed": "失败",
-                    "skipped": "无需执行",
-                }.get(status, "等待执行"),
+                "status_label": status_label,
                 "reward": item.get("reward") or "—",
             }
         )
@@ -814,7 +901,7 @@ def build_dashboard(storage: Storage) -> dict:
             state["batches"].get(kind),
             state["schedules"][kind],
         )
-        for kind in ("estate", "tianji", "pagoda")
+        for kind in ("estate", "tianji", "pagoda", "beast_merge")
     ]
     active_kind = state.get("active_kind") or ""
     active_card = next((card for card in cards if card["kind"] == active_kind), None)

@@ -10,6 +10,7 @@ from tg_game.services.external_sync import (
     get_external_keepalive_poll_seconds,
     is_external_account_expired,
 )
+from tg_game.services import profile_rebirth
 from tg_game.features.cultivation import biz_cultivation_countdown as cultivation_countdown
 from tg_game.features.tianxing import build_exploration_route_gate, build_retreat_route_gate
 from tg_game.storage import CompatDb as RuntimeDb
@@ -62,6 +63,8 @@ FANREN_AUTO_JIYIN_CHOICES = {
 # 自动探寻裂缝
 RIFT_EXPLORE_COMMAND = ".探寻裂缝"
 RIFT_EXPLORE_COOLDOWN_SECONDS = 43200  # 12 小时
+RIFT_WIND_THUNDER_WINGS_COOLDOWN_SECONDS = 32400  # 9 小时
+RIFT_WIND_THUNDER_WINGS_NAME = "风雷翅"
 RIFT_RETRY_INTERVAL_SECONDS = 600  # 10 分钟
 RIFT_RETRY_MAX = 1
 RIFT_REPLY_TIMEOUT_SECONDS = FANREN_REPLY_SYNC_GRACE_SECONDS
@@ -867,37 +870,8 @@ def get_rift_failure_lock_reason(payload: dict, raw_text: str = "") -> str:
         "破碎的肉身" in text and "虚弱期" in text
     )
     if status == "ESCAPED_SOUL" or escaped_soul_reply:
-        return "元婴遁逃·虚弱（残魂状态），已停止全部自动任务"
+        return "元婴遁逃·虚弱（残魂状态），普通调度已冻结并进入自动夺舍重生"
     return ""
-
-
-def stop_all_automation_for_rift_failure(
-    db, chat_id, payload: dict, *, profile_id=None
-):
-    reason = get_rift_failure_lock_reason(payload)
-    if not reason:
-        return False
-    update_session(
-        db,
-        chat_id,
-        profile_id=profile_id,
-        enabled=0,
-        next_check_time=0,
-        next_check_source=reason,
-        stopped_reason=reason,
-        auto_jiyin_enabled=0,
-        auto_nanlong_enabled=0,
-        auto_rift_enabled=0,
-        auto_yuanying_enabled=0,
-        rift_next_check_time=0,
-        rift_retry_count=0,
-        rift_state=reason,
-        yuanying_state=reason,
-        last_event="rift_escaped_soul",
-        last_summary=reason,
-        last_command_msg_id=0,
-    )
-    return True
 
 
 def _parse_iso_to_ts(raw_value) -> float:
@@ -911,11 +885,80 @@ def _parse_iso_to_ts(raw_value) -> float:
         return 0.0
 
 
-def _resolve_rift_next_due_at(raw_value) -> float:
+def parse_rift_cooldown_seconds(text: str) -> Optional[int]:
+    match = re.search(
+        r"请在\s*((?:\d+\s*(?:小时|分钟|秒)\s*)+)后再行探寻",
+        str(text or ""),
+    )
+    if not match:
+        return None
+    return cultivation_countdown.parse_cooldown_seconds(match.group(1))
+
+
+def get_rift_cooldown_seconds(storage=None, profile_id=None) -> int:
+    if storage is not None and profile_id:
+        profile = storage.get_profile(int(profile_id))
+        if profile and RIFT_WIND_THUNDER_WINGS_NAME in str(profile.artifact_text or ""):
+            return RIFT_WIND_THUNDER_WINGS_COOLDOWN_SECONDS
+    return RIFT_EXPLORE_COOLDOWN_SECONDS
+
+
+def get_rift_cooldown_label(storage=None, profile_id=None) -> str:
+    return f"{get_rift_cooldown_seconds(storage, profile_id) // 3600} 小时"
+
+
+def _resolve_rift_next_due_at(
+    raw_value, cooldown_seconds: int = RIFT_EXPLORE_COOLDOWN_SECONDS
+) -> float:
     last_ts = _parse_iso_to_ts(raw_value)
     if last_ts <= 0:
         return 0.0
-    return last_ts + RIFT_EXPLORE_COOLDOWN_SECONDS
+    return last_ts + int(cooldown_seconds)
+
+
+def _reconcile_rift_success_schedule(db, storage, session: dict) -> dict:
+    if not storage or not session or not session.get("auto_rift_enabled"):
+        return session
+    if not str(session.get("rift_state") or "").startswith("探寻成功"):
+        return session
+    last_rift_time = str(session.get("rift_last_asc_time") or "").strip()
+    if not last_rift_time:
+        return session
+    cooldown_seconds = get_rift_cooldown_seconds(
+        storage, session.get("profile_id")
+    )
+    expected_next = _resolve_rift_next_due_at(last_rift_time, cooldown_seconds)
+    current_next = float(session.get("rift_next_check_time") or 0)
+    if expected_next <= 0 or abs(current_next - expected_next) < 1:
+        return session
+    rift_state = f"探寻成功 - 冷却至 {format_timestamp(expected_next)}"
+    update_session(
+        db,
+        session["chat_id"],
+        profile_id=session.get("profile_id"),
+        rift_next_check_time=expected_next,
+        rift_state=rift_state,
+        last_summary=f"自动探寻裂缝冷却已校准至 {format_timestamp(expected_next)}",
+    )
+    append_rift_execution_log(
+        storage,
+        profile_id=session.get("profile_id"),
+        chat_id=session["chat_id"],
+        thread_id=session.get("thread_id"),
+        step="reconcile",
+        event_type="cooldown_reconciled",
+        rift_state=rift_state,
+        retry_count=int(session.get("rift_retry_count") or 0),
+        detail={
+            "previous_next_due_at": current_next,
+            "next_due_at": expected_next,
+            "cooldown_seconds": cooldown_seconds,
+            "source": "profile_artifact",
+        },
+    )
+    return get_session(
+        db, session["chat_id"], profile_id=session.get("profile_id")
+    )
 
 
 def _is_waiting_rift_reply(session: dict) -> bool:
@@ -1044,7 +1087,8 @@ async def _refresh_asc_rift_status(storage, profile_id, chat_id, db):
                 "next_due_at": 0.0,
                 "cooldown_ready": False,
             }
-        next_due_at = _resolve_rift_next_due_at(new_rift_time)
+        cooldown_seconds = get_rift_cooldown_seconds(storage, profile_id)
+        next_due_at = _resolve_rift_next_due_at(new_rift_time, cooldown_seconds)
         cooldown_ready = next_due_at <= time.time() if next_due_at > 0 else False
         update_session(
             db,
@@ -1062,6 +1106,7 @@ async def _refresh_asc_rift_status(storage, profile_id, chat_id, db):
             "payload": cultivator if isinstance(cultivator, dict) else {},
             "last_rift_explore_time": new_rift_time,
             "next_due_at": next_due_at,
+            "cooldown_seconds": cooldown_seconds,
             "cooldown_ready": cooldown_ready,
         }
     except Exception as exc:
@@ -1862,6 +1907,22 @@ async def _event_reply_message(event):
         return None
 
 
+async def _resolve_rebirth_reply_command(event, storage, profile_id) -> str:
+    reply_to_msg_id = _event_reply_to_msg_id(event)
+    if storage is not None and profile_id and reply_to_msg_id > 0:
+        parent = storage.get_bound_message(
+            int(getattr(event, "chat_id", 0) or 0),
+            reply_to_msg_id,
+            int(profile_id),
+        )
+        parent_command = str((parent or {}).get("text") or "").strip()
+        if profile_rebirth.is_rebirth_command(parent_command):
+            return parent_command
+    reply_message = await _event_reply_message(event)
+    reply_text = str(getattr(reply_message, "raw_text", "") or "").strip()
+    return reply_text if profile_rebirth.is_rebirth_command(reply_text) else ""
+
+
 def _allowed_cultivation_reply_commands(session) -> set[str]:
     return {
         FANREN_CHECK_COMMAND,
@@ -2046,6 +2107,7 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
     session = get_session(db, event.chat_id, profile_id=profile_id)
     if not session:
         return None
+    storage = getattr(client, "_tg_game_storage", None) if client is not None else None
     last_action = (session.get("last_action") or "").strip()
     yuanying_reply_command = _resolve_yuanying_reply_command(
         event, session, client
@@ -2081,6 +2143,71 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
             )
         return None
 
+    rebirth_reply_command = await _resolve_rebirth_reply_command(
+        event,
+        storage,
+        int(session.get("profile_id") or profile_id or 0),
+    )
+    if storage is not None and rebirth_reply_command:
+        rebirth_result = profile_rebirth.handle_profile_rebirth_reply(
+            storage,
+            profile_id=int(session.get("profile_id") or profile_id or 0),
+            chat_id=int(event.chat_id),
+            message_id=int(getattr(event, "id", 0) or 0),
+            text=raw_text,
+            reply_command=rebirth_reply_command,
+        )
+        if rebirth_result:
+            event_type = str(rebirth_result.get("event") or "")
+            state = rebirth_result.get("state") or {}
+            update_fields = {
+                "last_bot_text": raw_text[:1000],
+                "last_bot_msg_id": int(getattr(event, "id", 0) or 0),
+                "last_event": event_type,
+            }
+            if event_type == "rebirth_cooldown":
+                cooldown = int(rebirth_result.get("cooldown_seconds") or 0)
+                update_fields.update(
+                    rift_state=f"残魂恢复中：等待 {format_duration(cooldown)} 后重试夺舍",
+                    last_summary=f"夺舍重生仍在冷却，将在 {format_timestamp(state.get('retry_at') or 0)} 重试",
+                )
+            elif event_type == "rebirth_choice_queued":
+                selected = rebirth_result.get("selected") or {}
+                command = f"{profile_rebirth.REBIRTH_CHOICE_COMMAND_PREFIX}{int(selected.get('index') or 0)}"
+                update_fields.update(
+                    rift_state=(
+                        f"残魂恢复中：已选择 {selected.get('root') or '候选肉身'}，等待夺舍结果"
+                    ),
+                    last_action=command,
+                    last_action_time=time.time(),
+                    last_summary=f"已按灵根优先级排队执行 {command}",
+                )
+            elif event_type == "rebirth_completed":
+                queue_recheck = state.get("queue_recheck") or {}
+                update_fields.update(
+                    rift_state="夺舍重生完成，普通调度已重新检查并恢复",
+                    rift_next_check_time=time.time()
+                    + get_rift_cooldown_seconds(storage, session.get("profile_id")),
+                    rift_retry_count=0,
+                    last_action="",
+                    last_action_time=time.time(),
+                    last_command_msg_id=0,
+                    last_summary=(
+                        "夺舍重生完成，队列重新检查："
+                        f"保留 {int(queue_recheck.get('kept') or 0)}，"
+                        f"取消失效 {int(queue_recheck.get('invalid_cancelled') or 0)}"
+                    ),
+                )
+            update_session(
+                db,
+                event.chat_id,
+                profile_id=session.get("profile_id"),
+                **update_fields,
+            )
+            return FanrenParseResult(
+                event_type, update_fields.get("last_summary") or event_type
+            )
+
     if (
         session.get("auto_yuanying_enabled")
         and _is_yuanying_settlement_text(raw_text)
@@ -2114,11 +2241,6 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
         if expected_command_msg_id > 0 and incoming_reply_to_msg_id != expected_command_msg_id:
             return None
         now = time.time()
-        storage = (
-            getattr(client, "_tg_game_storage", None)
-            if client is not None
-            else None
-        )
         append_rift_execution_log(
             storage,
             profile_id=session.get("profile_id"),
@@ -2135,6 +2257,50 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
             text=raw_text,
             detail={"command_msg_id": expected_command_msg_id},
         )
+        reply_cooldown_seconds = parse_rift_cooldown_seconds(raw_text)
+        if reply_cooldown_seconds is not None:
+            next_due_at = now + reply_cooldown_seconds
+            cooldown_state = f"冷却中 - bot回包至 {format_timestamp(next_due_at)}"
+            update_session(
+                db,
+                event.chat_id,
+                profile_id=session.get("profile_id"),
+                rift_next_check_time=next_due_at,
+                rift_retry_count=0,
+                rift_state=cooldown_state,
+                last_summary=(
+                    f"探寻裂缝尚在冷却，下次在 {format_timestamp(next_due_at)} 后"
+                ),
+                last_event="rift_cooldown_wait",
+                last_bot_text=raw_text[:1000],
+                last_bot_msg_id=event.id,
+                last_command_msg_id=0,
+            )
+            append_rift_execution_log(
+                storage,
+                profile_id=session.get("profile_id"),
+                chat_id=event.chat_id,
+                thread_id=session.get("thread_id"),
+                step="finalize",
+                event_type="cooldown_wait",
+                rift_state=cooldown_state,
+                retry_count=0,
+                message_id=int(getattr(event, "id", 0) or 0),
+                reply_to_msg_id=incoming_reply_to_msg_id,
+                sender_id=int(getattr(event, "sender_id", 0) or 0),
+                sender_username=str(getattr(sender, "username", "") or ""),
+                text=raw_text,
+                detail={
+                    "countdown_seconds": reply_cooldown_seconds,
+                    "next_due_at": next_due_at,
+                    "source": "bot_reply",
+                },
+            )
+            return FanrenParseResult(
+                "rift_cooldown_wait",
+                "探寻裂缝冷却中",
+                reply_cooldown_seconds,
+            )
         refresh_result = None
         rift_profile_id = int(session.get("profile_id") or 0)
         if storage and rift_profile_id:
@@ -2171,6 +2337,9 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
                 "message": (refresh_result or {}).get("message") or "",
                 "cooldown_ready": bool((refresh_result or {}).get("cooldown_ready")),
                 "next_due_at": float((refresh_result or {}).get("next_due_at") or 0),
+                "cooldown_seconds": int(
+                    (refresh_result or {}).get("cooldown_seconds") or 0
+                ),
                 "payload_status": str(payload.get("status") or ""),
                 "last_rift_explore_time": str(
                     (refresh_result or {}).get("last_rift_explore_time") or ""
@@ -2179,41 +2348,40 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
         )
         rift_failure_reason = get_rift_failure_lock_reason(payload, raw_text)
         if rift_failure_reason:
-            stop_result = {}
+            rebirth_state = {}
             if storage and rift_profile_id:
-                from tg_game.services.profile_schedules import (
-    stop_current_profile_schedules,
+                rebirth_state = profile_rebirth.start_profile_rebirth(
+                    storage,
+                    profile_id=rift_profile_id,
+                    chat_id=int(event.chat_id),
+                    thread_id=(
+                        int(session["thread_id"]) if session.get("thread_id") else None
+                    ),
+                    chat_type=str(session.get("chat_type") or "group"),
+                    bot_username=str(
+                        session.get("bot_username") or FANREN_BOT_USERNAME
+                    ),
                 )
-
-                stop_result = stop_current_profile_schedules(storage, rift_profile_id)
-            else:
-                if stop_all_automation_for_rift_failure(
-                    db,
-                    event.chat_id,
-                    payload,
-                    profile_id=session.get("profile_id"),
-                ):
-                    try:
-                        import biz_sect_game
-
-                        biz_sect_game.stop_all_automation(
-                            db,
-                            event.chat_id,
-                            rift_failure_reason,
-                            profile_id=session.get("profile_id"),
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Stopping sect automation for rift failure failed",
-                            exc_info=True,
-                        )
+            update_session(
+                db,
+                event.chat_id,
+                profile_id=session.get("profile_id"),
+                stopped_reason="",
+                rift_state=rift_failure_reason,
+                rift_next_check_time=0,
+                rift_retry_count=0,
+                last_event="rift_escaped_soul",
+                last_summary=rift_failure_reason,
+                last_bot_text=raw_text[:1000],
+                last_bot_msg_id=int(getattr(event, "id", 0) or 0),
+            )
             append_rift_execution_log(
                 storage,
                 profile_id=session.get("profile_id"),
                 chat_id=event.chat_id,
                 thread_id=session.get("thread_id"),
-                step="stop",
-                event_type="escaped_soul_stop",
+                step="rebirth",
+                event_type="escaped_soul_rebirth_started",
                 rift_state=rift_failure_reason,
                 retry_count=int(session.get("rift_retry_count") or 0),
                 message_id=int(getattr(event, "id", 0) or 0),
@@ -2223,7 +2391,7 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
                 text=raw_text,
                 detail={
                     "payload_status": str(payload.get("status") or ""),
-                    "stop_result": stop_result,
+                    "rebirth_state": rebirth_state,
                 },
             )
             return FanrenParseResult(
@@ -2617,6 +2785,20 @@ async def runner(client, storage, profile_id=None):
             db = RuntimeDb(storage)
             now = time.time()
             for session in list_sessions(db, profile_id=profile_id):
+                session_profile_id = int(session.get("profile_id") or 0)
+                if profile_rebirth.is_profile_rebirth_locked(
+                    storage, session_profile_id
+                ):
+                    rebirth_state = profile_rebirth.load_profile_rebirth_state(
+                        storage, session_profile_id
+                    )
+                    if int(rebirth_state.get("chat_id") or 0) == int(
+                        session.get("chat_id") or 0
+                    ):
+                        profile_rebirth.tick_profile_rebirth(
+                            storage, session_profile_id, now=now
+                        )
+                    continue
                 if not session["enabled"]:
                     # 即使闭关主任务未启用，也检查独立子任务
                     pass
@@ -2674,6 +2856,7 @@ async def runner(client, storage, profile_id=None):
 
                 # 自动探寻裂缝
                 if session.get("auto_rift_enabled"):
+                    session = _reconcile_rift_success_schedule(db, storage, session)
                     rift_next = session.get("rift_next_check_time") or 0
                     if not rift_next or now >= rift_next:
                         try:

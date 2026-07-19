@@ -28,6 +28,16 @@ from tg_game.features.artifact.biz_artifact_touch_auto import (
     ARTIFACT_TOUCH_FEATURE_KEY,
     ARTIFACT_TOUCH_MIN_INTERVAL_SECONDS,
 )
+from tg_game.features.artifact.biz_artifact_nurture import (
+    ARTIFACT_NURTURE_AWAIT_REPLY_STATE,
+    ARTIFACT_NURTURE_BOT_COOLDOWN_STATE,
+    ARTIFACT_NURTURE_DEFAULT_COOLDOWN_SECONDS,
+    ARTIFACT_NURTURE_DEFAULT_TARGET_NAME,
+    ARTIFACT_NURTURE_FEATURE_KEY,
+    ARTIFACT_NURTURE_REPLY_WAIT_SECONDS,
+    ARTIFACT_NURTURE_STOPPED_RESOURCES_STATE,
+    build_artifact_nurture_resource_state,
+)
 from tg_game.features.artifact.biz_artifact_trial import (
     ARTIFACT_TRIAL_AWAIT_REPLY_STATE,
     ARTIFACT_TRIAL_BOT_COOLDOWN_STATE,
@@ -213,15 +223,20 @@ from tg_game.web.biz_web_display_formatting import (
     stringify_payload_stat_value as _stringify_payload_stat_value,
 )
 from tg_game.web.biz_artifact_view_model import (
+    build_artifact_nurture_auto_view as _artifact_build_artifact_nurture_auto_view,
+    build_artifact_nurture_command as _artifact_build_artifact_nurture_command,
     build_artifact_touch_auto_view as _artifact_build_artifact_touch_auto_view,
     build_artifact_trial_auto_view as _artifact_build_artifact_trial_auto_view,
     build_artifact_trial_command as _artifact_build_artifact_trial_command,
+    normalize_artifact_nurture_target_name as _artifact_normalize_artifact_nurture_target_name,
     normalize_artifact_touch_command as _artifact_normalize_artifact_touch_command,
     normalize_artifact_touch_interval as _artifact_normalize_artifact_touch_interval,
     normalize_artifact_trial_artifact_name as _artifact_normalize_artifact_trial_artifact_name,
     normalize_artifact_trial_route as _artifact_normalize_artifact_trial_route,
+    pack_artifact_nurture_strategy as _artifact_pack_artifact_nurture_strategy,
     pack_artifact_touch_strategy as _artifact_pack_artifact_touch_strategy,
     pack_artifact_trial_strategy as _artifact_pack_artifact_trial_strategy,
+    unpack_artifact_nurture_strategy as _artifact_unpack_artifact_nurture_strategy,
     unpack_artifact_touch_strategy as _artifact_unpack_artifact_touch_strategy,
     unpack_artifact_trial_strategy as _artifact_unpack_artifact_trial_strategy,
 )
@@ -343,6 +358,7 @@ __all__ = [
     'COMPANION_AUTO_MANUAL_DELAY_SECONDS',
     'ARTIFACT_TOUCH_REPLY_WAIT_SECONDS',
     'ARTIFACT_TRIAL_REPLY_WAIT_SECONDS',
+    'ARTIFACT_NURTURE_REPLY_WAIT_SECONDS',
     'SMALL_WORLD_AUTO_DEFAULT_REFRESH_MINUTES',
     '_get_profile_cultivation_binding',
     '_set_all_profile_cultivation',
@@ -371,6 +387,11 @@ __all__ = [
     '_build_artifact_trial_command',
     '_build_artifact_touch_auto_view',
     '_build_artifact_trial_auto_view',
+    '_normalize_artifact_nurture_target_name',
+    '_pack_artifact_nurture_strategy',
+    '_unpack_artifact_nurture_strategy',
+    '_build_artifact_nurture_command',
+    '_build_artifact_nurture_auto_view',
     '_normalize_xinggong_starboard_target',
     '_is_xinggong_starboard_insufficient_reply',
     '_is_xinggong_starboard_success_reply',
@@ -723,6 +744,34 @@ def _build_artifact_trial_auto_view(
     )
 
 
+def _normalize_artifact_nurture_target_name(value: object) -> str:
+    return _artifact_normalize_artifact_nurture_target_name(value)
+
+
+def _pack_artifact_nurture_strategy(target_name: object) -> str:
+    return _artifact_pack_artifact_nurture_strategy(target_name)
+
+
+def _unpack_artifact_nurture_strategy(value: object) -> str:
+    return _artifact_unpack_artifact_nurture_strategy(value)
+
+
+def _build_artifact_nurture_command(target_name: object) -> str:
+    return _artifact_build_artifact_nurture_command(target_name)
+
+
+def _build_artifact_nurture_auto_view(
+    raw_task: Optional[dict],
+    payload: Optional[dict] = None,
+    game_items_dict: Optional[dict] = None,
+) -> dict:
+    return _artifact_build_artifact_nurture_auto_view(
+        raw_task,
+        payload,
+        game_items_dict,
+    )
+
+
 def _normalize_xinggong_starboard_target(value: object) -> str:
     return normalize_starboard_target(value)
 
@@ -998,13 +1047,6 @@ OTHER_PLAY_DEFINITIONS = [
         "title": "卜筮问天",
         "command": ".卜筮问天",
         "description": "直接占一次气运与吉凶，适合日常顺手点。",
-        "type": "button",
-    },
-    {
-        "key": "pagoda",
-        "title": "琉璃古塔",
-        "command": ".闯塔",
-        "description": "按当前战力一路闯塔，页面会额外展示 payload 里的古塔进度。",
         "type": "button",
     },
     {
@@ -1838,10 +1880,10 @@ def _build_rift_failure_profile_state(
     status = str((payload or {}).get("status") or "").strip().upper()
     if status != "ESCAPED_SOUL":
         return None
-    reason = str((cultivation_session or {}).get("stopped_reason") or "").strip()
+    reason = str((cultivation_session or {}).get("rift_state") or "").strip()
     return {
         "title": "元婴遁逃·虚弱",
-        "summary": reason or "当前为残魂状态，探寻裂缝已触发自动任务熔断。",
+        "summary": reason or "当前为残魂状态，普通调度已冻结，系统正在自动夺舍重生。",
         "status": status,
         "dao_name": str((payload or {}).get("dao_name") or "").strip(),
         "stage_name": str((payload or {}).get("cultivation_level") or "").strip(),

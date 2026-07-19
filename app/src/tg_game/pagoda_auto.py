@@ -5,11 +5,12 @@ import re
 
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 FEATURE_KEY = "pagoda_tower"
+# 仅用于识别和取消迁移前遗留的待发送命令；新自动化不再入队该指令。
 COMMAND = ".闯塔"
 DEFAULT_RUN_TIME = "00:05"
 PROFILE_STAGGER_SECONDS = 15
 FAILED_TODAY_ERROR = "今日闯塔失败，已等待明日固定时间。"
-SENT_TODAY_ERROR = "已发送今日闯塔，等待明日固定时间。"
+SENT_TODAY_ERROR = "今日 MiniApp 闯塔已排队，等待明日固定时间。"
 ATTEMPTED_TODAY_ERROR = "今日已闯塔，等待明日固定时间。"
 
 

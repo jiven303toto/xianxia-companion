@@ -14,6 +14,7 @@ from tg_game.services.external_sync import (
     read_cached_external_payload,
     sync_external_account,
 )
+from tg_game.services.profile_rebirth import is_profile_rebirth_locked
 from tg_game.storage import CompatDb as RuntimeDb
 from tg_game.features.cultivation.biz_cultivation_countdown import parse_yuanying_status_reply
 from tg_game.telegram.network_guard import get_network_pause_until, is_network_paused
@@ -5874,6 +5875,8 @@ async def runner(client, storage, profile_id=None):
                 if not session["enabled"]:
                     continue
                 session_profile_id = int(session.get("profile_id") or 0) or None
+                if is_profile_rebirth_locked(storage, session_profile_id):
+                    continue
                 if session_profile_id:
                     session = _restore_session_thread_from_binding(
                         storage, db, session_profile_id, session

@@ -241,6 +241,15 @@ function mountGlobalLoadingForms() {
     };
 
     window.addEventListener('pageshow', (event) => {
+        if (window.location.pathname !== '/profile') {
+            resetLoadingState();
+            return;
+        }
+        if (!event.persisted) {
+            consumeProfileSwitchRefreshNeeded();
+            resetLoadingState();
+            return;
+        }
         if (!primeProfileRefreshLoading(overlay, message)) {
             resetLoadingState();
             return;
@@ -257,11 +266,7 @@ function mountGlobalLoadingForms() {
                 await new Promise((resolve) => {
                     window.setTimeout(resolve, profileRefreshLoadingHoldMs);
                 });
-                if (event.persisted) {
-                    window.location.reload();
-                    return;
-                }
-                resetLoadingState();
+                window.location.reload();
             });
     });
 
@@ -1286,7 +1291,6 @@ function mountAdminGlobalExecution() {
     }
 }
 
-primeProfileRefreshLoading();
 warmHealthCheck();
 warmJadeLoadingAssets();
 mountCountdowns();

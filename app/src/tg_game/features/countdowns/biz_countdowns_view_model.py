@@ -10,6 +10,11 @@ from tg_game.features.artifact.biz_artifact_touch_auto import (
     ARTIFACT_TOUCH_FEATURE_KEY,
     unpack_artifact_touch_strategy,
 )
+from tg_game.features.artifact.biz_artifact_nurture import (
+    ARTIFACT_NURTURE_BOT_COOLDOWN_STATE,
+    ARTIFACT_NURTURE_FEATURE_KEY,
+    unpack_artifact_nurture_strategy,
+)
 from tg_game.features.artifact.biz_artifact_trial import (
     ARTIFACT_TRIAL_BOT_COOLDOWN_STATE,
     ARTIFACT_TRIAL_FEATURE_KEY,
@@ -24,6 +29,7 @@ from tg_game.features.companion.biz_companion_voyage import (
     COMPANION_VOYAGE_FEATURE_KEY,
     normalize_companion_voyage_strategy,
 )
+from tg_game.features.beast_merge import biz_beast_merge_daily_auto
 from tg_game.features.cultivation.biz_cultivation_countdown import build_cultivation_countdown_entries
 from tg_game.features.estate import biz_estate_hunt_daily_auto
 from tg_game.features.fishing import biz_fishing_daily_auto
@@ -235,6 +241,12 @@ def build_auto_task_countdown_items(
             "/modules/estate",
             "estate-hunt",
         ),
+        biz_beast_merge_daily_auto.FEATURE_KEY: (
+            "每日噬金虫进化",
+            "三界游历",
+            "/modules/other#beast-merge-panel",
+            "beast-merge",
+        ),
         biz_fishing_daily_auto.FEATURE_KEY: (
             "每日自动钓鱼",
             "灵溪垂钓",
@@ -269,6 +281,12 @@ def build_auto_task_countdown_items(
             "/modules/other",
             "artifact-trial",
         ),
+        ARTIFACT_NURTURE_FEATURE_KEY: (
+            "自动温养器灵",
+            "三界游历",
+            "/modules/other",
+            "artifact-nurture",
+        ),
         XINGGONG_STARBOARD_FEATURE_KEY: (
             "自动星辰采集",
             "宗门大殿",
@@ -296,6 +314,12 @@ def build_auto_task_countdown_items(
         ):
             continue
         if (
+            feature_key == ARTIFACT_NURTURE_FEATURE_KEY
+            and str(task.get("workflow_state") or "").strip()
+            != ARTIFACT_NURTURE_BOT_COOLDOWN_STATE
+        ):
+            continue
+        if (
             feature_key == WANLING_ROAM_FEATURE_KEY
             and str(current_sect_name or "").strip() != "万灵宗"
         ):
@@ -314,6 +338,8 @@ def build_auto_task_countdown_items(
             detail = f"固定 {biz_tianji_trial_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_estate_hunt_daily_auto.FEATURE_KEY:
             detail = f"固定 {biz_estate_hunt_daily_auto.normalize_run_time(strategy)}"
+        elif feature_key == biz_beast_merge_daily_auto.FEATURE_KEY:
+            detail = f"固定 {biz_beast_merge_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_fishing_daily_auto.FEATURE_KEY:
             detail = f"固定 {biz_fishing_daily_auto.normalize_run_time(strategy)}"
         elif feature_key == biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY:
@@ -332,6 +358,8 @@ def build_auto_task_countdown_items(
         elif feature_key == ARTIFACT_TRIAL_FEATURE_KEY:
             artifact_name, route = unpack_artifact_trial_strategy(strategy)
             detail = f"{artifact_name} · {route}"
+        elif feature_key == ARTIFACT_NURTURE_FEATURE_KEY:
+            detail = unpack_artifact_nurture_strategy(strategy)
         elif feature_key == XINGGONG_STARBOARD_FEATURE_KEY:
             detail = f"目标 {normalize_starboard_target(strategy)}"
         elif feature_key == WANLING_ROAM_FEATURE_KEY:

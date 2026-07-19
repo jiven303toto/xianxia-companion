@@ -109,7 +109,7 @@
 }
 .artifact-card-tab-row {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
     margin: 0 0 14px;
 }
@@ -191,6 +191,34 @@
 .other-low-frequency-grid > .detail-card {
     min-height: 300px;
     height: 100%;
+}
+.beast-merge-panel {
+    margin-top: 26px;
+}
+.beast-merge-card {
+    grid-column: 1 / -1;
+}
+.beast-merge-layout {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+.beast-merge-actions {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.8fr) minmax(360px, 1.2fr);
+    gap: 10px;
+    align-items: end;
+}
+.beast-merge-daily-form {
+    display: grid;
+    grid-template-columns: minmax(112px, 136px) minmax(180px, 1fr);
+    gap: 8px;
+    align-items: end;
+}
+.beast-merge-actions button {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
 }
 .other-play-form {
     grid-template-columns: 1fr;
@@ -949,7 +977,8 @@
         grid-column: auto;
     }
     .companion-daily-layout,
-    .mulan-daily-layout {
+    .mulan-daily-layout,
+    .beast-merge-layout {
         grid-template-columns: 1fr;
     }
     .companion-daily-actions {
@@ -992,6 +1021,8 @@
     }
     .tianji-trial-action-grid,
     .tianji-trial-daily-form,
+    .beast-merge-actions,
+    .beast-merge-daily-form,
     .mulan-stat-grid,
     .mulan-action-row,
     .mulan-tool-row {

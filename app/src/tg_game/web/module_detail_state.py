@@ -283,8 +283,10 @@ def build_artifact_module_state(
     command_chat,
     artifact_touch_feature_key: str,
     artifact_trial_feature_key: str,
+    artifact_nurture_feature_key: str,
     build_artifact_touch_auto_view,
     build_artifact_trial_auto_view,
+    build_artifact_nurture_auto_view,
 ) -> dict:
     if not enabled:
         return {}
@@ -304,6 +306,15 @@ def build_artifact_module_state(
                 profile_id,
                 chat_id,
                 artifact_trial_feature_key,
+            ),
+            payload or {},
+            game_items_dict,
+        ),
+        "artifact_nurture_auto_state": build_artifact_nurture_auto_view(
+            storage.get_companion_auto_task(
+                profile_id,
+                chat_id,
+                artifact_nurture_feature_key,
             ),
             payload or {},
             game_items_dict,
@@ -364,6 +375,7 @@ def build_other_module_state(
     excluded_companion_auto_feature_keys,
     artifact_touch_feature_key: str,
     artifact_trial_feature_key: str,
+    artifact_nurture_feature_key: str,
     mulan_auto_support_feature_key: str,
     companion_panel_command: str,
     companion_voyage_status_command: str,
@@ -383,6 +395,7 @@ def build_other_module_state(
     build_companion_heart_tribulation_view,
     build_artifact_touch_auto_view,
     build_artifact_trial_auto_view,
+    build_artifact_nurture_auto_view,
 ) -> dict:
     if not enabled:
         return {}
@@ -410,6 +423,15 @@ def build_other_module_state(
                         profile_id,
                         command_chat.chat_id,
                         artifact_trial_feature_key,
+                    ),
+                    current_payload,
+                    game_items_dict,
+                ),
+                "artifact_nurture_auto_state": build_artifact_nurture_auto_view(
+                    storage.get_companion_auto_task(
+                        profile_id,
+                        command_chat.chat_id,
+                        artifact_nurture_feature_key,
                     ),
                     current_payload,
                     game_items_dict,
@@ -490,6 +512,7 @@ def build_other_module_state(
                 storage,
                 profile_id,
                 command_chat.chat_id if command_chat else None,
+                current_payload,
             ),
             "tianji_trial_daily_auto_state": build_tianji_trial_daily_auto_view(
                 storage.get_companion_auto_task(
@@ -531,6 +554,7 @@ def build_module_detail_default_state(
     build_estate_hunt_daily_auto_view,
     build_artifact_touch_auto_view,
     build_artifact_trial_auto_view,
+    build_artifact_nurture_auto_view,
     build_wild_experience_view,
     build_companion_heart_tribulation_view,
 ) -> dict:
@@ -594,6 +618,7 @@ def build_module_detail_default_state(
         "estate_hunt_daily_auto_state": build_estate_hunt_daily_auto_view(None),
         "artifact_touch_auto_state": build_artifact_touch_auto_view(None),
         "artifact_trial_auto_state": build_artifact_trial_auto_view(None),
+        "artifact_nurture_auto_state": build_artifact_nurture_auto_view(None),
         "wild_experience_state": build_wild_experience_view({}, None),
         "companion_heart_tribulation_state": build_companion_heart_tribulation_view(
             None

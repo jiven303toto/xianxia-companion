@@ -8,6 +8,7 @@ from typing import Optional
 import biz_fishing_game
 import biz_sect_game
 
+from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.tianxing.biz_tianxing_runtime import (
     normalize_config as normalize_tianxing_config,
     normalize_state as normalize_tianxing_state,
@@ -62,6 +63,7 @@ COMPANION_TASK_LABELS = {
     "mulan_support_plan": "自动慕兰",
     "artifact_touch": "自动抚摸法宝",
     "artifact_trial": "自动器灵试炼",
+    "artifact_nurture": "自动温养器灵",
     "xinggong_starboard": "自动星辰采集",
     "wanling_roam": "自动一键放养",
     "small_world_auto": "自动小世界",
@@ -534,6 +536,12 @@ def _new_outgoing_commands(
     return [dict(row) for row in rows]
 
 
+def _pagoda_request_queued(storage: Storage, profile_id: int) -> bool:
+    account = storage.get_external_account(int(profile_id), "asc_aiopenai") or {}
+    payload = _load_json_object(account.get("me_json"))
+    return pagoda_state.has_active_pagoda_request(payload)
+
+
 async def _apply_item(storage: Storage, item: dict, *, now: float) -> list[dict]:
     before_id = _latest_outgoing_id(storage)
     executor = str(item.get("executor") or "")
@@ -668,7 +676,11 @@ async def reconcile_overdue_schedules(
             failed_count += 1
             skip_reasons["executor_error"] += 1
             continue
-        if commands:
+        local_pagoda_request = (
+            str(item.get("task_key") or "") == "pagoda_tower"
+            and _pagoda_request_queued(storage, int(item["profile_id"]))
+        )
+        if commands or local_pagoda_request:
             item["status"] = "requeued"
             item["queued_commands"] = [
                 {
@@ -679,6 +691,8 @@ async def reconcile_overdue_schedules(
             ]
             requeued_count += 1
             queued_command_count += len(commands)
+            if local_pagoda_request:
+                item["queued_locally"] = "MiniApp 闯塔"
         else:
             item["status"] = "skipped"
             item["reason"] = "executor_rechecked_no_queue"
@@ -745,6 +759,8 @@ def format_reconcile_result(result: dict) -> str:
             for command in item.get("queued_commands") or []
         )
         suffix = f" commands={commands}" if commands else ""
+        if item.get("queued_locally"):
+            suffix += f" local={item['queued_locally']}"
         lines.append(
             "调度补偿明细: "
             f"profile={int(item.get('profile_id') or 0)} "

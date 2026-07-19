@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import re
 from typing import Optional
+from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.web.biz_web_display_formatting import (
     build_payload_stat_items_with_defaults,
     coerce_json_dict,
@@ -9,22 +10,44 @@ from tg_game.web.biz_web_display_formatting import (
 
 
 def build_pagoda_view(payload: dict, *, today_text: str) -> dict:
-    raw_progress = coerce_json_dict((payload or {}).get("pagoda_progress"))
-    highest_floor = int(raw_progress.get("highest_floor") or 0)
+    data = payload or {}
+    raw_progress = coerce_json_dict(data.get("pagoda_progress"))
+    miniapp = pagoda_state.build_pagoda_miniapp_view(data)
+    server_state = miniapp.get("state") if isinstance(miniapp.get("state"), dict) else {}
+    run = coerce_json_dict(coerce_json_dict(data.get("pagoda_miniapp")).get("run"))
+    highest_floor = int(server_state.get("recordHighest") or raw_progress.get("highest_floor") or 0)
     last_attempt_date = str(raw_progress.get("last_attempt_date") or "").strip()
+    attempted_today = bool(last_attempt_date[:10] == str(today_text or "")) or bool(
+        str(run.get("day_key") or "") == str(today_text or "")
+        and str(run.get("status") or "") in {"settled", "skipped"}
+    )
     return {
         "highest_floor": highest_floor,
         "highest_floor_text": f"第 {highest_floor} 层" if highest_floor else "-",
-        "is_in_pagoda": bool(raw_progress.get("is_in_pagoda")),
+        "today_highest": int(server_state.get("todayHighest") or 0),
+        "tower_marks": int(server_state.get("towerMarks") or 0),
+        "power": int(server_state.get("power") or 0),
+        "can_challenge": bool(server_state.get("canChallenge")),
+        "is_in_pagoda": bool(miniapp.get("active") or raw_progress.get("is_in_pagoda")),
         "last_attempt_date": last_attempt_date,
-        "attempted_today": bool(last_attempt_date[:10] == str(today_text or "")),
-        "failed_floor": int((payload or {}).get("pagoda_failed_floor") or 0),
-        "resets_today": int((payload or {}).get("pagoda_resets_today") or 0),
-        "claimed_floors": coerce_json_list((payload or {}).get("pagoda_claimed_floors")),
+        "attempted_today": attempted_today,
+        "failed_floor": int(server_state.get("failedFloor") or data.get("pagoda_failed_floor") or 0),
+        "resets_today": int(server_state.get("resetsToday") or data.get("pagoda_resets_today") or 0),
+        "claimed_floors": coerce_json_list(data.get("pagoda_claimed_floors")),
+        "miniapp_active": bool(miniapp.get("active")),
+        "miniapp_status": str(miniapp.get("status") or "idle"),
+        "miniapp_status_label": str(miniapp.get("status_label") or "尚未通过 MiniApp 执行"),
+        "miniapp_updated_at": str(miniapp.get("updated_at") or ""),
+        "miniapp_error": str(miniapp.get("error") or ""),
     }
 
 
-def build_pagoda_today_view(storage, profile_id: int, chat_id: Optional[int]) -> dict:
+def build_pagoda_today_view(
+    storage,
+    profile_id: int,
+    chat_id: Optional[int],
+    payload: Optional[dict] = None,
+) -> dict:
     empty = {
         "attempt_count": 0,
         "success_count": 0,
@@ -35,6 +58,26 @@ def build_pagoda_today_view(storage, profile_id: int, chat_id: Optional[int]) ->
         "floor_text": "-",
         "reward_lines": [],
     }
+    now_local = datetime.now(timezone(timedelta(hours=8)))
+    today_text = now_local.date().isoformat()
+    miniapp_root = coerce_json_dict((payload or {}).get("pagoda_miniapp"))
+    miniapp_run = coerce_json_dict(miniapp_root.get("run"))
+    if miniapp_run and str(miniapp_run.get("day_key") or today_text) == today_text:
+        replay = coerce_json_dict(miniapp_run.get("replay"))
+        status = str(miniapp_run.get("status") or "")
+        updated_at = str(miniapp_run.get("updated_at") or "")
+        floor = int(replay.get("endFloor") or replay.get("failedFloor") or 0)
+        return {
+            "attempt_count": 1 if status in {"settled", "skipped", "failed", "interrupted"} else 0,
+            "success_count": 1 if status == "settled" else 0,
+            "failed_count": 1 if status in {"failed", "interrupted"} else 0,
+            "no_reply_count": 0,
+            "latest_time_display": updated_at[-8:] if len(updated_at) >= 8 else "-",
+            "latest_status": str(miniapp_run.get("status_label") or status or "等待执行"),
+            "floor_text": f"{floor} 层" if floor else "-",
+            "reward_lines": list(miniapp_run.get("reward_lines") or replay.get("rewardLines") or []),
+        }
+
     if (
         not storage
         or not hasattr(storage, "list_bound_messages")
@@ -43,7 +86,6 @@ def build_pagoda_today_view(storage, profile_id: int, chat_id: Optional[int]) ->
     ):
         return empty
 
-    now_local = datetime.now(timezone(timedelta(hours=8)))
     day_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     commands = [
         message

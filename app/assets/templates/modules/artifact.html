@@ -47,14 +47,16 @@
 
     {% set artifact_touch_command_text = artifact_touch_auto_state.command_text or '' %}
     {% set artifact_trial_default = artifact_trial_auto_state.artifact_name or artifact_touch_command_text.replace('.抚摸法宝', '').strip() or equipped_artifact_name or '玄天斩灵剑' %}
+    {% set artifact_nurture_default = artifact_nurture_auto_state.target_name or artifact_trial_auto_state.artifact_name or artifact_trial_default %}
     <div class="detail-card" data-artifact-tabs>
         <div class="section-header compact">
-            <p>定时抚摸 / 器灵试炼</p>
+            <p>定时抚摸 / 器灵试炼 / 温养器灵</p>
             <h2>法宝器灵</h2>
         </div>
         <div class="artifact-card-tab-row" role="tablist" aria-label="法宝器灵操作">
             <button type="button" class="inline-button artifact-card-tab active" data-artifact-tab-target="touch" role="tab" aria-selected="true">定时抚摸</button>
             <button type="button" class="inline-button artifact-card-tab" data-artifact-tab-target="trial" role="tab" aria-selected="false">器灵试炼</button>
+            <button type="button" class="inline-button artifact-card-tab" data-artifact-tab-target="nurture" role="tab" aria-selected="false">温养器灵</button>
         </div>
         <div data-artifact-tab-panel="touch">
             <div class="stack-list compact-stack">
@@ -118,6 +120,32 @@
             <p class="muted top-gap">启动前检查灵石和养魂木；发送后只使用当前 profile 自己命令对应的 bot 回包更新冷却。</p>
             {% if artifact_trial_auto_state.last_error %}
             <p class="muted top-gap">{{ artifact_trial_auto_state.last_error }}</p>
+            {% endif %}
+        </div>
+        <div data-artifact-tab-panel="nurture" hidden>
+            <div class="stack-list compact-stack">
+                <div class="kv-row"><span>状态</span><strong style="color: {% if artifact_nurture_auto_state.active %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ '运行中' if artifact_nurture_auto_state.active else '未启动' }}</strong></div>
+                <div class="kv-row"><span>下次执行</span><strong {% if artifact_nurture_auto_state.next_run_target %}class="countdown-text" data-countdown-target="{{ artifact_nurture_auto_state.next_run_target }}"{% endif %}>{{ artifact_nurture_auto_state.next_run_display }}</strong></div>
+                <div class="kv-row"><span>灵石</span><strong>{{ artifact_nurture_auto_state.resources.spirit_stones }} / {{ artifact_nurture_auto_state.resources.spirit_stone_cost }}</strong></div>
+                <div class="kv-row"><span>养魂木</span><strong>{{ artifact_nurture_auto_state.resources.soul_wood }} / {{ artifact_nurture_auto_state.resources.soul_wood_cost }}</strong></div>
+            </div>
+            <form class="form-grid top-gap" method="post" action="/runtime/artifact/nurture-auto" data-global-loading data-loading-message="{{ '正在停止自动温养器灵' if artifact_nurture_auto_state.active else '正在开启自动温养器灵' }}">
+                <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
+                <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
+                <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
+                <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
+                <input type="hidden" name="redirect_to" value="/modules/artifact">
+                <label class="full-span">
+                    法宝或器灵名
+                    <input name="target_name" value="{{ artifact_nurture_default }}" placeholder="玄天斩灵剑" {% if artifact_nurture_auto_state.active %}readonly{% endif %} required>
+                </label>
+                <div class="action-row" style="align-items: end;">
+                    <button type="submit" class="inline-button auto-toggle-button{% if artifact_nurture_auto_state.active %} active{% endif %}" {% if not command_chat_ready %}disabled{% endif %}>{{ '停止自动温养' if artifact_nurture_auto_state.active else '开启自动温养' }}</button>
+                </div>
+            </form>
+            <p class="muted top-gap">启动前检查灵石 3000 和养魂木 3；成功后按 6 小时冷却，只接受当前 profile 自己命令对应的 bot 回包。</p>
+            {% if artifact_nurture_auto_state.last_error %}
+            <p class="muted top-gap">{{ artifact_nurture_auto_state.last_error }}</p>
             {% endif %}
         </div>
     </div>

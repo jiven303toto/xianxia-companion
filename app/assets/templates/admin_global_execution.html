@@ -3,7 +3,7 @@
 <section class="hero compact-hero">
     <p class="eyebrow">中枢敕令</p>
     <h1>诸元神巡令</h1>
-    <p class="hero-text">统一调度全部元神的每日事务；洞府、天机、古塔与噬金虫均走 MiniApp，古塔按元神严格串行。</p>
+    <p class="hero-text">统一调度全部元神的每日事务；洞府、天机、古塔、噬金虫与野外历练均走 MiniApp，古塔和野外历练按元神严格串行。</p>
 </section>
 
 <section
@@ -11,6 +11,7 @@
     data-admin-execution-page
     data-status-url="/admin/global-execution/status"
     data-active="{{ '1' if admin_execution.active else '0' }}"
+    data-active-kind="{{ admin_execution.active_kind }}"
     data-loading-message="{{ admin_execution.loading_message }}"
 >
     {% for card in admin_execution.cards %}
@@ -20,7 +21,7 @@
                 <p>每日巡令</p>
                 <h2>{{ card.title }}</h2>
             </div>
-            <span class="admin-execution-status is-{{ card.status }}">{{ card.status_label }}</span>
+            <span class="admin-execution-status is-{{ card.status }}" data-admin-execution-status>{{ card.status_label }}</span>
         </div>
 
         <form class="admin-execution-schedule" method="post" action="/admin/global-execution/{{ card.kind }}/schedule">
@@ -32,6 +33,16 @@
                 <span>触发时间</span>
                 <input type="time" name="run_time" value="{{ card.schedule.run_time }}" required>
             </label>
+            {% if card.kind == 'wild_experience' %}
+            <label class="admin-execution-schedule-time">
+                <span>统一策略</span>
+                <select name="strategy" data-admin-execution-strategy-select="{{ card.kind }}">
+                    {% for option in card.strategy_options %}
+                    <option value="{{ option }}" {% if card.strategy == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            {% endif %}
             <button type="submit" class="inline-button">保存计划</button>
         </form>
 
@@ -44,19 +55,24 @@
             method="post"
             action="/admin/global-execution/{{ card.kind }}"
             data-admin-execution-form
+            data-admin-execution-kind="{{ card.kind }}"
         >
+            {% if card.kind == 'wild_experience' %}
+            <input type="hidden" name="strategy" value="{{ card.strategy }}" data-admin-execution-strategy-input="{{ card.kind }}">
+            {% endif %}
             <button type="submit" class="button admin-execution-button" {% if admin_execution.active %}disabled{% endif %}>{{ card.button }}</button>
         </form>
 
         <div class="admin-execution-summary">
-            <div><span>执行时间</span><strong>{{ card.started_at }}</strong></div>
-            <div><span>成功</span><strong>{{ card.counts.success }}</strong></div>
-            <div><span>失败</span><strong>{{ card.counts.failed }}</strong></div>
-            <div><span>无需执行</span><strong>{{ card.counts.skipped }}</strong></div>
+            <div><span>执行时间</span><strong data-admin-execution-summary="started_at">{{ card.started_at }}</strong></div>
+            <div><span>成功</span><strong data-admin-execution-summary="success">{{ card.counts.success }}</strong></div>
+            <div><span>失败</span><strong data-admin-execution-summary="failed">{{ card.counts.failed }}</strong></div>
+            <div><span>无需执行</span><strong data-admin-execution-summary="skipped">{{ card.counts.skipped }}</strong></div>
         </div>
 
-        <details class="admin-execution-report" {% if card.status == 'running' %}open{% endif %}>
-            <summary>元神执行录（{{ card.done }}/{{ card.total }}）</summary>
+        <details class="admin-execution-report" data-admin-execution-report {% if card.status == 'running' %}open{% endif %}>
+            <summary data-admin-execution-report-summary>元神执行录（{{ card.done }}/{{ card.total }}）</summary>
+            <div data-admin-execution-report-body>
             {% if card["items"] %}
             <div class="admin-execution-report-table">
                 <div class="admin-execution-report-row is-header">
@@ -73,6 +89,7 @@
             {% else %}
             <p class="muted top-gap">暂无执行记录。</p>
             {% endif %}
+            </div>
         </details>
     </article>
     {% endfor %}

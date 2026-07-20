@@ -18,6 +18,7 @@ ESTATE_MINIAPP_WEB_PATH = "/miniapp/xianxia-dwelling"
 ESTATE_MINIAPP_API_PATH_PREFIX = "/api/miniapp/xianxia-dwelling/"
 ESTATE_MINIAPP_ENDPOINTS = {
     "start": f"{ESTATE_MINIAPP_API_PATH_PREFIX}start",
+    "journey": f"{ESTATE_MINIAPP_API_PATH_PREFIX}journey",
     "hunt": f"{ESTATE_MINIAPP_API_PATH_PREFIX}hunt",
     "hunt_reveal": f"{ESTATE_MINIAPP_API_PATH_PREFIX}hunt/reveal",
     "hunt_settle": f"{ESTATE_MINIAPP_API_PATH_PREFIX}hunt/settle",

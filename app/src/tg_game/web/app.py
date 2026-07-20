@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, quote_plus
 import biz_fanren_game
 import biz_fishing_game
 import biz_small_world_game
@@ -16,6 +16,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 from tg_game.clients.asc_client import AscAuthError
 from tg_game.config import get_settings
 from tg_game.module_commands import MODULE_COMMANDS
@@ -402,6 +403,21 @@ from tg_game.web.app_helpers import *  # noqa: F403
 from tg_game.web.profile_card_state import load_profile_card_state
 
 
+class VersionedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: dict):
+        response = await super().get_response(path, scope)
+        if response.status_code in {200, 304}:
+            query = parse_qs(
+                scope.get("query_string", b"").decode("latin-1")
+            )
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+                if query.get("v")
+                else "no-cache"
+            )
+        return response
+
+
 def _build_tianji_encounter_state(
     storage: Storage,
     profile_id: int,
@@ -544,8 +560,15 @@ def create_app() -> FastAPI:
     application.state.bot_sync_lock = bot_sync_lock
     admin_global_execution_lock = asyncio.Lock()
     application.state.admin_global_execution_lock = admin_global_execution_lock
+    bot_schedule_cache = {"loaded_at": 0.0, "state": None}
+    tianxing_marker_cache: dict[int, tuple[float, list[str]]] = {}
     web_started_at = time.time()
-    application.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    static_files = VersionedStaticFiles(directory=str(STATIC_DIR))
+    application.mount(
+        "/static",
+        GZipMiddleware(static_files, minimum_size=1024, compresslevel=5),
+        name="static",
+    )
 
     @application.exception_handler(SectCommandScopeError)
     async def sect_command_scope_error_handler(
@@ -698,6 +721,49 @@ def create_app() -> FastAPI:
             storage
         )
         return context
+
+    def _store_bot_schedule_state(state: dict) -> dict:
+        cached_state = dict(state or {})
+        bot_schedule_cache["loaded_at"] = time.monotonic()
+        bot_schedule_cache["state"] = cached_state
+        return dict(cached_state)
+
+    def _load_cached_bot_schedule_state() -> dict:
+        cached_state = bot_schedule_cache["state"]
+        if (
+            cached_state is not None
+            and time.monotonic() - float(bot_schedule_cache["loaded_at"]) < 60
+        ):
+            return dict(cached_state)
+        return _store_bot_schedule_state(_load_bot_schedule_state())
+
+    def _build_cached_tianxing_today_exploration_rewards(
+        target_storage: Storage,
+        profile_id: int,
+        now=None,
+        day_key: str = "",
+    ) -> dict:
+        current_time = float(time.time() if now is None else now)
+        cached = tianxing_marker_cache.get(int(profile_id))
+        if cached and time.monotonic() - cached[0] < 60:
+            marker_days = list(cached[1])
+        else:
+            marker_days = _build_tianxing_reward_marker_days(
+                target_storage,
+                profile_id,
+                now=current_time,
+            )
+            tianxing_marker_cache[int(profile_id)] = (
+                time.monotonic(),
+                list(marker_days),
+            )
+        return _build_tianxing_today_exploration_rewards(
+            target_storage,
+            profile_id,
+            now=current_time,
+            day_key=day_key,
+            marked_day_keys=marker_days,
+        )
 
     def _get_current_binding(active_profile, chat_id: int):
         if not active_profile:
@@ -1763,7 +1829,9 @@ def create_app() -> FastAPI:
                 Path(settings.database_path).with_name(_BOT_SYNC_RESULT_FILE_NAME),
                 request.query_params.get("bot_sync_result") or "",
             )
-            bot_schedule_state = await asyncio.to_thread(_load_bot_schedule_state)
+            bot_schedule_state = await asyncio.to_thread(
+                _load_cached_bot_schedule_state
+            )
         shared_template_context = _build_shared_template_context(active_profile)
         return templates.TemplateResponse(
             request,
@@ -1816,16 +1884,24 @@ def create_app() -> FastAPI:
         )
 
     @application.get("/admin/global-execution/status")
-    async def admin_global_execution_status(request: Request) -> JSONResponse:
+    async def admin_global_execution_status(
+        request: Request,
+        kind: str = "",
+    ) -> JSONResponse:
         active_profile = _get_request_profile(request)
         if not _is_admin_profile(active_profile):
             raise HTTPException(status_code=403, detail="Only admin can run global tasks")
-        return JSONResponse(admin_global_execution.build_dashboard(storage))
+        try:
+            status = admin_global_execution.build_status(storage, kind=kind)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return JSONResponse(status)
 
     @application.post("/admin/global-execution/{kind}")
     async def admin_global_execution_start(
         request: Request,
         kind: str,
+        strategy: str = Form("均衡"),
     ) -> JSONResponse:
         active_profile = _get_request_profile(request)
         if not _is_admin_profile(active_profile):
@@ -1839,12 +1915,13 @@ def create_app() -> FastAPI:
                     fallback_chat_id=settings.bound_chat_id,
                     fallback_thread_id=settings.bound_thread_id,
                     fallback_chat_type=settings.bound_chat_type,
+                    strategy=strategy,
                 )
             except admin_global_execution.BatchBusyError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return JSONResponse(admin_global_execution.build_dashboard(storage))
+        return JSONResponse(admin_global_execution.build_status(storage, kind=kind))
 
     @application.post("/admin/global-execution/{kind}/schedule")
     async def admin_global_execution_schedule(
@@ -1852,6 +1929,7 @@ def create_app() -> FastAPI:
         kind: str,
         enabled: str = Form("0"),
         run_time: str = Form("00:05"),
+        strategy: str = Form("均衡"),
     ) -> RedirectResponse:
         active_profile = _get_request_profile(request)
         if not _is_admin_profile(active_profile):
@@ -1864,6 +1942,7 @@ def create_app() -> FastAPI:
                     enabled=enabled == "1",
                     run_time=run_time,
                     profiles=storage.list_profiles(),
+                    strategy=strategy,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1913,6 +1992,7 @@ def create_app() -> FastAPI:
                 detail="Only admin can manage Telegram Bot automation",
             )
         current_state = await asyncio.to_thread(_load_bot_schedule_state)
+        _store_bot_schedule_state(current_state)
         should_enable = str(enabled or "").strip() == "1"
         try:
             raw_output = await asyncio.to_thread(
@@ -1921,6 +2001,7 @@ def create_app() -> FastAPI:
                 current_state,
             )
             updated_state = await asyncio.to_thread(_load_bot_schedule_state)
+            _store_bot_schedule_state(updated_state)
             result = _build_bot_schedule_action_result(
                 "自动同步已开启" if should_enable else "自动同步已关闭",
                 (
@@ -1960,6 +2041,7 @@ def create_app() -> FastAPI:
                 detail="Only admin can manage Telegram Bot automation",
             )
         current_state = await asyncio.to_thread(_load_bot_schedule_state)
+        _store_bot_schedule_state(current_state)
         try:
             raw_output = await asyncio.to_thread(
                 _update_bot_schedule,
@@ -1968,6 +2050,7 @@ def create_app() -> FastAPI:
                 and not bool(current_state.get("enabled")),
             )
             updated_state = await asyncio.to_thread(_load_bot_schedule_state)
+            _store_bot_schedule_state(updated_state)
             result = _build_bot_schedule_action_result(
                 "自动同步时间已更新",
                 "新的执行周期已写入 Windows 计划任务；首次执行按服务器当前时间加周期计算。",
@@ -2336,7 +2419,7 @@ def create_app() -> FastAPI:
                     is_tianxing_sect_profile=_is_tianxing_sect_profile,
                     get_tianxing_status_snapshot=get_tianxing_status_snapshot,
                     build_tianxing_today_exploration_rewards=(
-                        _build_tianxing_today_exploration_rewards
+                        _build_cached_tianxing_today_exploration_rewards
                     ),
                 )
                 sect_recent_reply_text = sect_module_state["sect_recent_reply_text"]
@@ -5242,57 +5325,11 @@ def create_app() -> FastAPI:
         expired_redirect = _ensure_external_session_active(profile)
         if expired_redirect:
             return expired_redirect
-
-        normalized_chat_id = str(chat_id or "").strip()
-        if not normalized_chat_id:
-            raise HTTPException(status_code=400, detail="Chat ID not configured")
-        resolved_chat_id = int(normalized_chat_id)
-        resolved_thread_id = int(thread_id) if thread_id and thread_id.isdigit() else None
-        normalized_strategy = _normalize_wild_experience_strategy(strategy)
-        existing_task = storage.get_companion_auto_task(
-            profile.id, resolved_chat_id, "wild_experience"
-        )
-        if existing_task and bool(existing_task.get("enabled")):
-            storage.disable_companion_auto_task(
-                profile.id, resolved_chat_id, "wild_experience"
-            )
-            storage.cancel_pending_outgoing_commands(
-                profile.id,
-                resolved_chat_id,
-                text=f".野外历练 {str(existing_task.get('strategy') or normalized_strategy).strip() or normalized_strategy}",
-            )
-            return RedirectResponse(url=redirect_to, status_code=303)
-
-        payload = read_cached_external_payload(storage, profile.id)
-        next_run_at = _resolve_auto_feature_next_run_at(
-            payload if isinstance(payload, dict) else {}, "wild_experience"
-        )
-        if next_run_at is None:
-            storage.upsert_companion_auto_task(
-                profile_id=profile.id,
-                chat_id=resolved_chat_id,
-                feature_key="wild_experience",
-                enabled=False,
-                strategy=normalized_strategy,
-                thread_id=resolved_thread_id,
-                chat_type=chat_type,
-                bot_username=bot_username,
-                next_run_at=0,
-                last_error="最新 payload 缺少野外历练冷却字段，已停止自动。",
-            )
-            return RedirectResponse(url=redirect_to, status_code=303)
-
-        storage.upsert_companion_auto_task(
-            profile_id=profile.id,
-            chat_id=resolved_chat_id,
-            feature_key="wild_experience",
-            enabled=True,
-            strategy=normalized_strategy,
-            thread_id=resolved_thread_id,
-            chat_type=chat_type,
-            bot_username=bot_username,
-            next_run_at=next_run_at,
-            last_error="",
+        _ = (chat_id, strategy, thread_id, chat_type, bot_username)
+        admin_global_execution.disable_profile_automations(
+            storage,
+            "wild_experience",
+            [profile],
         )
         return RedirectResponse(url=redirect_to, status_code=303)
 

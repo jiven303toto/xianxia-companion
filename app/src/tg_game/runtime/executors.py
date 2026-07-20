@@ -90,6 +90,9 @@ from tg_game.features.luoyun_spirit_tree import (
 from tg_game.features.luoyun_spirit_tree import (
     biz_luoyun_spirit_tree_miniapp as luoyun_spirit_tree_miniapp,
 )
+from tg_game.features.wild_experience import (
+    biz_wild_experience_miniapp as wild_experience_miniapp,
+)
 from tg_game.features.fishing.biz_fishing_replies import build_session_updates_from_reply
 from tg_game.features.fishing import biz_fishing_miniapp as fishing_miniapp
 from tg_game.features.fishing import biz_fishing_daily_auto
@@ -595,6 +598,82 @@ def _cancel_legacy_pagoda_outgoing(storage: Storage, profile_id: int) -> int:
     return cancelled
 
 
+def _disable_legacy_wild_experience(storage: Storage, profile_id: int) -> int:
+    disabled = 0
+    for task in storage.list_active_companion_auto_tasks(int(profile_id)):
+        if str(task.get("feature_key") or "") != wild_experience_miniapp.FEATURE_KEY:
+            continue
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            enabled=0,
+            next_run_at=0,
+            workflow_state="retired",
+            last_error="群命令野外历练已失效，功能已迁移至“诸元神巡令”。",
+        )
+        for strategy in wild_experience_miniapp.STRATEGY_OPTIONS:
+            storage.cancel_pending_outgoing_commands(
+                int(profile_id),
+                int(task.get("chat_id") or 0),
+                text=f".野外历练 {strategy}",
+                thread_id=task.get("thread_id"),
+                require_exact_thread=True,
+            )
+        disabled += 1
+    return disabled
+
+
+async def _run_pending_wild_experience(
+    client: object,
+    storage: Storage,
+    profile_id: int,
+    payload: Optional[dict] = None,
+) -> bool:
+    _ = payload
+    execution_owner = secrets.token_hex(16)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: wild_experience_miniapp.claim_request(
+            latest,
+            execution_owner,
+        ),
+    )
+    if not wild_experience_miniapp.is_request_owned(
+        current_payload,
+        execution_owner,
+    ):
+        return False
+    request = wild_experience_miniapp.get_active_request(current_payload)
+    current_payload = _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: wild_experience_miniapp.mark_request_running(
+            latest,
+            execution_owner,
+        ),
+    )
+    result = await wild_experience_miniapp.run_public_production_flow(
+        client,
+        discovery_storage=storage,
+        strategy=request.get("strategy"),
+    )
+    if not result.get("ok") and result.get("status") != "retry_pending":
+        logger.warning(
+            "Wild experience MiniApp failed: %s",
+            result.get("error"),
+        )
+    _update_external_payload(
+        storage,
+        int(profile_id),
+        lambda latest: wild_experience_miniapp.finish_request(
+            latest,
+            result,
+            execution_owner,
+        ),
+    )
+    return True
+
+
 async def _run_pending_estate_public_hunt(
     client: object,
     storage: Storage,
@@ -776,14 +855,21 @@ async def _run_pending_pagoda_public(
             )
             break
         except asyncio.TimeoutError:
-            current_payload = _update_external_payload(
-                storage,
-                int(profile_id),
-                lambda latest: pagoda_state.renew_pagoda_request_lease(
-                    latest,
-                    execution_owner=execution_owner,
-                ),
-            )
+            try:
+                current_payload = _update_external_payload(
+                    storage,
+                    int(profile_id),
+                    lambda latest: pagoda_state.renew_pagoda_request_lease(
+                        latest,
+                        execution_owner=execution_owner,
+                    ),
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Pagoda request lease renewal failed for profile=%s: %s",
+                    profile_id,
+                    exc,
+                )
     if not result.get("ok"):
         logger.warning(
             "Pagoda public MiniApp flow failed: %s",
@@ -1005,16 +1091,34 @@ async def _run_pending_luoyun_spirit_tree(
             )
         ),
     )
+    now = time.time()
+    chat_id = int(request.get("chat_id") or 0)
+    task = (
+        storage.get_companion_auto_task(
+            int(profile_id),
+            chat_id,
+            biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
+        )
+        if chat_id
+        else None
+    )
     retry_request = None
     if str(result.get("status") or "") == "retry_pending":
+        retry_count = max(int(request.get("retry_count") or 0) + 1, 1)
+        retry_delay = (
+            luoyun_spirit_tree_miniapp.resolve_luoyun_spirit_tree_retry_delay(
+                retry_count
+            )
+        )
         retry_request = luoyun_spirit_tree_miniapp.build_luoyun_spirit_tree_request(
             chat_id=request.get("chat_id"),
             thread_id=request.get("thread_id"),
             chat_type=str(request.get("chat_type") or "group"),
             bot_username=str(request.get("bot_username") or "fanrenxiuxian_bot"),
             run_mode=str(request.get("run_mode") or "daily"),
-            not_before=time.time()
-            + luoyun_spirit_tree_miniapp.LUOYUN_SPIRIT_TREE_PENDING_RETRY_SECONDS,
+            not_before=now + retry_delay,
+            retry_count=retry_count,
+            day_key=str(request.get("day_key") or ""),
         )
     updated_payload = luoyun_spirit_tree_miniapp.merge_luoyun_spirit_tree_payload(
         current_payload,
@@ -1028,36 +1132,87 @@ async def _run_pending_luoyun_spirit_tree(
         updated_payload,
     )
 
-    chat_id = int(request.get("chat_id") or 0)
-    task = (
-        storage.get_companion_auto_task(
-            int(profile_id),
-            chat_id,
-            biz_luoyun_spirit_tree_daily_auto.FEATURE_KEY,
-        )
-        if chat_id
-        else None
-    )
     if task and str(result.get("failure_kind") or "") == "proof_rejected":
         storage.update_companion_auto_task(
             int(task["id"]),
             enabled=0,
             next_run_at=0,
+            workflow_state="proof_rejected",
             last_error="服务端拒绝灵眼赛 proof，已关闭每日调度并保留最后机会。",
         )
     elif task and retry_request is not None:
+        safe_error = (
+            luoyun_spirit_tree_miniapp.sanitize_luoyun_spirit_tree_secret_text(
+                result.get("error") or "云梦山灵眼赛执行失败。"
+            )
+        )
+        retry_count = int(retry_request.get("retry_count") or 1)
+        retry_delay = int(
+            float(retry_request.get("not_before") or 0) - now
+        )
         storage.update_companion_auto_task(
             int(task["id"]),
             next_run_at=float(retry_request.get("not_before") or 0),
-            last_error="提交回包中断，将使用同一 runToken 与 proof 重提。",
-        )
-    elif task and not result.get("ok"):
-        storage.update_companion_auto_task(
-            int(task["id"]),
-            last_error=luoyun_spirit_tree_miniapp.sanitize_luoyun_spirit_tree_secret_text(
-                result.get("error") or "云梦山灵眼赛执行失败。"
+            last_run_at=now,
+            workflow_state="retry_wait",
+            retry_count=retry_count,
+            last_error=(
+                f"{safe_error}；第 {retry_count} 次补跑将在 {max(retry_delay, 0)} 秒后继续。"
             ),
         )
+    elif (
+        task
+        and str(request.get("run_mode") or "daily") == "daily"
+        and luoyun_spirit_tree_miniapp.is_luoyun_spirit_tree_daily_target_reached(
+            updated_payload,
+            now=now,
+        )
+    ):
+        run_time = biz_luoyun_spirit_tree_daily_auto.normalize_run_time(
+            task.get("strategy")
+        )
+        tomorrow_run_at = biz_luoyun_spirit_tree_daily_auto.resolve_next_run_at(
+            run_time,
+            now=now,
+            force_tomorrow=True,
+        )
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            last_run_at=now,
+            next_run_at=tomorrow_run_at,
+            workflow_state="completed_today",
+            retry_count=0,
+            last_error=biz_luoyun_spirit_tree_daily_auto.COMPLETED_TODAY_ERROR,
+        )
+    elif task and result.get("ok"):
+        storage.update_companion_auto_task(
+            int(task["id"]),
+            retry_count=0,
+            last_error="",
+        )
+    elif task and not result.get("ok"):
+        safe_error = (
+            luoyun_spirit_tree_miniapp.sanitize_luoyun_spirit_tree_secret_text(
+                result.get("error") or "云梦山灵眼赛执行失败。"
+            )
+        )
+        fields = {"last_error": safe_error, "retry_count": 0}
+        if str(request.get("run_mode") or "daily") == "daily":
+            run_time = biz_luoyun_spirit_tree_daily_auto.normalize_run_time(
+                task.get("strategy")
+            )
+            fields.update(
+                {
+                    "last_run_at": now,
+                    "next_run_at": biz_luoyun_spirit_tree_daily_auto.resolve_next_run_at(
+                        run_time,
+                        now=now,
+                        force_tomorrow=True,
+                    ),
+                    "workflow_state": "failed_today",
+                }
+            )
+        storage.update_companion_auto_task(int(task["id"]), **fields)
     return True
 
 
@@ -4659,6 +4814,7 @@ async def _run_companion_auto_scheduler(
 
     while True:
         try:
+            _disable_legacy_wild_experience(storage, int(profile_id))
             tasks = storage.list_active_companion_auto_tasks(int(profile_id))
             if task_ids is not None:
                 tasks = [
@@ -4680,6 +4836,13 @@ async def _run_companion_auto_scheduler(
                 tick_tianxing_timeline(storage, int(profile_id), now=now)
                 tick_craft_loop(storage, int(profile_id), now=now)
             payload = read_cached_external_payload(storage, int(profile_id))
+            if task_ids is None and await _run_pending_wild_experience(
+                client,
+                storage,
+                int(profile_id),
+                payload,
+            ):
+                payload = read_cached_external_payload(storage, int(profile_id))
             if task_ids is None and await _run_pending_estate_public_hunt(
                 client,
                 storage,
@@ -5094,18 +5257,6 @@ async def _run_companion_auto_scheduler(
                         now=now,
                         force_tomorrow=True,
                     )
-                    last_run_at = float(task.get("last_run_at") or 0)
-                    if biz_luoyun_spirit_tree_daily_auto.is_same_local_day(
-                        last_run_at,
-                        now,
-                    ):
-                        storage.update_companion_auto_task(
-                            task_id,
-                            next_run_at=tomorrow_run_at,
-                            workflow_state="sent_today",
-                            last_error=biz_luoyun_spirit_tree_daily_auto.SENT_TODAY_ERROR,
-                        )
-                        continue
                     latest_payload = read_cached_external_payload(
                         storage,
                         int(profile_id),
@@ -5119,6 +5270,7 @@ async def _run_companion_auto_scheduler(
                             last_run_at=now,
                             next_run_at=tomorrow_run_at,
                             workflow_state="completed_today",
+                            retry_count=0,
                             last_error=(
                                 biz_luoyun_spirit_tree_daily_auto.COMPLETED_TODAY_ERROR
                             ),
@@ -5131,7 +5283,9 @@ async def _run_companion_auto_scheduler(
                             task_id,
                             next_run_at=now
                             + luoyun_spirit_tree_miniapp.LUOYUN_SPIRIT_TREE_PENDING_RETRY_SECONDS,
-                            last_error="已有云梦山灵眼赛请求在运行，稍后复查。",
+                            workflow_state=(
+                                str(task.get("workflow_state") or "") or "running"
+                            ),
                         )
                         continue
                     updated_payload = luoyun_spirit_tree_miniapp.queue_luoyun_spirit_tree_request(
@@ -5154,9 +5308,11 @@ async def _run_companion_auto_scheduler(
                     storage.update_companion_auto_task(
                         task_id,
                         last_run_at=now,
-                        next_run_at=tomorrow_run_at,
-                        workflow_state="sent_today",
-                        last_error=biz_luoyun_spirit_tree_daily_auto.SENT_TODAY_ERROR,
+                        next_run_at=now
+                        + luoyun_spirit_tree_miniapp.LUOYUN_SPIRIT_TREE_PENDING_RETRY_SECONDS,
+                        workflow_state="running",
+                        retry_count=0,
+                        last_error="云梦山灵眼赛已排队，等待公共洞府入口。",
                     )
                     continue
 

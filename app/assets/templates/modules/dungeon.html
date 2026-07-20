@@ -138,6 +138,26 @@ async function refreshDungeonFeed() {
     }
 }
 
+function stopDungeonFeedPolling() {
+    if (!dungeonFeedTimer) return;
+    window.clearInterval(dungeonFeedTimer);
+    dungeonFeedTimer = null;
+}
+
+function startDungeonFeedPolling() {
+    if (dungeonFeedTimer || document.hidden) return;
+    dungeonFeedTimer = window.setInterval(refreshDungeonFeed, 5000);
+}
+
+function syncDungeonFeedPolling() {
+    if (document.hidden) {
+        stopDungeonFeedPolling();
+        return;
+    }
+    refreshDungeonFeed();
+    startDungeonFeedPolling();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.dungeon-command-fill').forEach((button) => {
         button.addEventListener('click', () => {
@@ -150,10 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     renderDungeonFeed(initialDungeonMessages);
     dungeonFeedSignature = buildDungeonFeedSignature(initialDungeonMessages);
-    dungeonFeedTimer = window.setInterval(refreshDungeonFeed, 5000);
+    startDungeonFeedPolling();
 });
 
-window.addEventListener('beforeunload', () => {
-    if (dungeonFeedTimer) window.clearInterval(dungeonFeedTimer);
-});
+document.addEventListener('visibilitychange', syncDungeonFeedPolling);
+window.addEventListener('beforeunload', stopDungeonFeedPolling);
 </script>

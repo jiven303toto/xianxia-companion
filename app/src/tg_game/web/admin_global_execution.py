@@ -16,6 +16,9 @@ from tg_game.features.estate.biz_estate_miniapp import (
 from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.tianji_trial import queue_tianji_trial_request
 from tg_game.features.tianji_trial import biz_tianji_trial_daily_auto
+from tg_game.features.wild_experience import (
+    biz_wild_experience_miniapp as wild_experience_miniapp,
+)
 from tg_game.storage import Storage
 
 
@@ -25,9 +28,11 @@ PAGODA_COMMAND = pagoda_auto.COMMAND
 BATCH_TIMEOUT_SECONDS = 15 * 60
 PAGODA_BATCH_TIMEOUT_SECONDS = 30 * 60
 BEAST_MERGE_BATCH_TIMEOUT_SECONDS = 30 * 60
+WILD_EXPERIENCE_BATCH_TIMEOUT_SECONDS = 30 * 60
 TERMINAL_STATUSES = {"success", "failed", "skipped"}
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 SCHEDULE_POLL_SECONDS = 15
+TASK_ORDER = ("estate", "tianji", "pagoda", "beast_merge", "wild_experience")
 
 TASKS = {
     "estate": {
@@ -54,6 +59,12 @@ TASKS = {
         "feature_key": biz_beast_merge_daily_auto.FEATURE_KEY,
         "default_run_time": biz_beast_merge_daily_auto.DEFAULT_RUN_TIME,
     },
+    "wild_experience": {
+        "title": "野外历练",
+        "button": "敕令诸元神·野外历练",
+        "feature_key": wild_experience_miniapp.FEATURE_KEY,
+        "default_run_time": wild_experience_miniapp.DEFAULT_RUN_TIME,
+    },
 }
 
 
@@ -69,6 +80,7 @@ def _empty_state() -> dict:
             kind: {
                 "enabled": False,
                 "run_time": task["default_run_time"],
+                "strategy": "均衡" if kind == "wild_experience" else "",
                 "last_started_day": "",
                 "last_started_at": 0,
             }
@@ -98,6 +110,11 @@ def _load_state(storage: Storage) -> dict:
             "enabled": bool(raw.get("enabled")),
             "run_time": pagoda_auto.normalize_run_time(
                 raw.get("run_time") or task["default_run_time"]
+            ),
+            "strategy": (
+                wild_experience_miniapp.normalize_strategy(raw.get("strategy"))
+                if kind == "wild_experience"
+                else ""
             ),
             "last_started_day": str(raw.get("last_started_day") or ""),
             "last_started_at": float(raw.get("last_started_at") or 0),
@@ -385,6 +402,65 @@ def _start_beast_merge_item(storage: Storage, profile, item: dict) -> None:
         item["reward"] = _beast_merge_reward(updated_payload)
 
 
+def _start_wild_experience_item(
+    storage: Storage,
+    profile,
+    item: dict,
+    *,
+    strategy: str,
+) -> None:
+    item["scheduled_at"] = time.time()
+    item["phase"] = "queued"
+    account, payload = _load_external(storage, profile.id)
+    if not _profile_ready(profile, account, item):
+        item["status"] = "failed"
+        return
+    if wild_experience_miniapp.is_completed_today(payload):
+        item["status"] = "skipped"
+        item["reward"] = wild_experience_miniapp.build_reward_summary(payload)
+        return
+    queued_payload = storage.update_external_account_payload(
+        int(profile.id),
+        "asc_aiopenai",
+        lambda latest: wild_experience_miniapp.queue_request(
+            latest,
+            strategy=strategy,
+            chat_id=item["chat_id"],
+            thread_id=item["thread_id"],
+            chat_type=item["chat_type"],
+            bot_username=item["bot_username"],
+        ),
+    )
+    if not wild_experience_miniapp.get_active_request(queued_payload):
+        item["status"] = "failed"
+
+
+def _dispatch_next_wild_experience_item(
+    storage: Storage,
+    items: list[dict],
+    *,
+    strategy: str,
+) -> None:
+    for item in items:
+        if item.get("status") in TERMINAL_STATUSES:
+            continue
+        if float(item.get("scheduled_at") or 0) > 0:
+            return
+        profile = storage.get_profile(int(item.get("profile_id") or 0))
+        if profile is None:
+            item["status"] = "failed"
+            item["scheduled_at"] = time.time()
+            continue
+        _start_wild_experience_item(
+            storage,
+            profile,
+            item,
+            strategy=strategy,
+        )
+        if item.get("status") not in TERMINAL_STATUSES:
+            return
+
+
 def start_batch(
     storage: Storage,
     kind: str,
@@ -394,12 +470,16 @@ def start_batch(
     fallback_thread_id: int | None = None,
     fallback_chat_type: str = "group",
     source: str = "manual",
+    strategy: str = "均衡",
 ) -> dict:
     if kind not in TASKS:
         raise ValueError("Unknown global execution task")
     state = refresh_state(storage)
     if state.get("active_kind"):
         raise BatchBusyError("已有全局任务正在执行")
+    normalized_strategy = wild_experience_miniapp.normalize_strategy(strategy)
+    if kind == "wild_experience":
+        disable_profile_automations(storage, kind, profiles)
 
     now = time.time()
     items = []
@@ -424,12 +504,19 @@ def start_batch(
 
     if kind == "pagoda":
         _dispatch_next_pagoda_item(storage, items)
+    elif kind == "wild_experience":
+        _dispatch_next_wild_experience_item(
+            storage,
+            items,
+            strategy=normalized_strategy,
+        )
 
     batch = {
         "id": uuid.uuid4().hex,
         "kind": kind,
         "status": "running",
         "source": str(source or "manual"),
+        "strategy": normalized_strategy if kind == "wild_experience" else "",
         "started_at": now,
         "finished_at": 0,
         "items": items,
@@ -480,6 +567,11 @@ def disable_profile_automations(storage: Storage, kind: str, profiles: list) -> 
                 ]
             elif kind == "pagoda":
                 commands = [PAGODA_COMMAND]
+            elif kind == "wild_experience":
+                commands = [
+                    f".野外历练 {strategy}"
+                    for strategy in wild_experience_miniapp.STRATEGY_OPTIONS
+                ]
             for command in commands:
                 storage.cancel_pending_outgoing_commands(
                     int(profile.id),
@@ -498,6 +590,7 @@ def set_schedule(
     enabled: bool,
     run_time: str,
     profiles: list,
+    strategy: str = "均衡",
     now: float | None = None,
 ) -> dict:
     if kind not in TASKS:
@@ -509,6 +602,8 @@ def set_schedule(
     time_changed = normalized_time != str(schedule.get("run_time") or "")
     schedule["enabled"] = bool(enabled)
     schedule["run_time"] = normalized_time
+    if kind == "wild_experience":
+        schedule["strategy"] = wild_experience_miniapp.normalize_strategy(strategy)
     if enabled and (not was_enabled or time_changed):
         current = _local_now(now)
         if current.strftime("%H:%M") >= normalized_time:
@@ -534,7 +629,7 @@ def run_due_schedule(
     current = _local_now(now)
     today = current.date().isoformat()
     current_time = current.strftime("%H:%M")
-    for kind in ("estate", "tianji", "pagoda", "beast_merge"):
+    for kind in TASK_ORDER:
         schedule = state["schedules"][kind]
         if not schedule.get("enabled"):
             continue
@@ -551,6 +646,7 @@ def run_due_schedule(
             fallback_thread_id=fallback_thread_id,
             fallback_chat_type=fallback_chat_type,
             source="schedule",
+            strategy=str(schedule.get("strategy") or "均衡"),
         )
         state = _load_state(storage)
         schedule = state["schedules"][kind]
@@ -732,6 +828,34 @@ def _refresh_pagoda_item(storage: Storage, item: dict) -> None:
     item["reward"] = _pagoda_reward(payload)
 
 
+def _refresh_wild_experience_item(storage: Storage, item: dict) -> None:
+    _account, payload = _load_external(storage, int(item["profile_id"]))
+    request = wild_experience_miniapp.get_active_request(payload)
+    if request:
+        request_status = str(request.get("status") or "queued")
+        item["status"] = (
+            "queued" if request_status == "retry_wait" else request_status
+        )
+        item["phase"] = request_status
+        return
+    state = (
+        payload.get(wild_experience_miniapp.STATE_KEY)
+        if isinstance(payload.get(wild_experience_miniapp.STATE_KEY), dict)
+        else {}
+    )
+    run = state.get("run") if isinstance(state.get("run"), dict) else {}
+    status = str(run.get("status") or "")
+    item["phase"] = status
+    if status == "completed":
+        item["status"] = "success"
+        item["reward"] = wild_experience_miniapp.build_reward_summary(payload)
+    elif status == "skipped":
+        item["status"] = "skipped"
+        item["reward"] = wild_experience_miniapp.build_reward_summary(payload)
+    elif status == "failed":
+        item["status"] = "failed"
+
+
 def refresh_state(storage: Storage) -> dict:
     state = _load_state(storage)
     active_kind = state.get("active_kind")
@@ -744,6 +868,7 @@ def refresh_state(storage: Storage) -> dict:
     timeout_seconds = {
         "beast_merge": BEAST_MERGE_BATCH_TIMEOUT_SECONDS,
         "pagoda": PAGODA_BATCH_TIMEOUT_SECONDS,
+        "wild_experience": WILD_EXPERIENCE_BATCH_TIMEOUT_SECONDS,
     }.get(active_kind, BATCH_TIMEOUT_SECONDS)
     timed_out = now - float(batch.get("started_at") or 0) >= timeout_seconds
     for item in batch.get("items") or []:
@@ -760,11 +885,23 @@ def refresh_state(storage: Storage) -> dict:
             if not float(item.get("scheduled_at") or 0):
                 continue
             _refresh_pagoda_item(storage, item)
+        elif active_kind == "wild_experience":
+            if not float(item.get("scheduled_at") or 0):
+                continue
+            _refresh_wild_experience_item(storage, item)
         else:
             _refresh_beast_merge_item(storage, item)
 
     if active_kind == "pagoda" and not timed_out:
         _dispatch_next_pagoda_item(storage, batch.get("items") or [])
+    elif active_kind == "wild_experience" and not timed_out:
+        _dispatch_next_wild_experience_item(
+            storage,
+            batch.get("items") or [],
+            strategy=wild_experience_miniapp.normalize_strategy(
+                batch.get("strategy")
+            ),
+        )
 
     if all(
         item.get("status") in TERMINAL_STATUSES
@@ -812,6 +949,9 @@ def _schedule_view(schedule: dict, *, now: float | None = None) -> dict:
     return {
         "enabled": enabled,
         "run_time": run_time,
+        "strategy": wild_experience_miniapp.normalize_strategy(
+            schedule.get("strategy")
+        ),
         "last_run_at": float(schedule.get("last_started_at") or 0),
         "last_run_display": _time_text(schedule.get("last_started_at")),
         "next_run_at": next_run_at,
@@ -828,7 +968,13 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
         status_label = {
             "queued": (
                 "等待入口"
-                if kind in {"estate", "tianji", "pagoda", "beast_merge"}
+                if kind in {
+                    "estate",
+                    "tianji",
+                    "pagoda",
+                    "beast_merge",
+                    "wild_experience",
+                }
                 else "等待发送"
             ),
             "resolving": "获取入口",
@@ -841,6 +987,8 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
                 if kind == "pagoda"
                 else "正在进化"
                 if kind == "beast_merge"
+                else "正在历练"
+                if kind == "wild_experience"
                 else "执行中"
             ),
             "success": "成功",
@@ -853,6 +1001,8 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
             status_label = "读取塔况（start）"
         elif kind == "pagoda" and status == "running" and phase == "challenge":
             status_label = "服务端结算（challenge）"
+        elif kind == "wild_experience" and phase == "retry_wait":
+            status_label = "等待补跑"
         items.append(
             {
                 "profile_name": item.get("profile_name") or f"Profile {item.get('profile_id')}",
@@ -890,6 +1040,53 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
         "counts": counts,
         "items": items,
         "schedule": _schedule_view(schedule),
+        "strategy": wild_experience_miniapp.normalize_strategy(
+            schedule.get("strategy")
+        ),
+        "strategy_options": (
+            list(wild_experience_miniapp.STRATEGY_OPTIONS)
+            if kind == "wild_experience"
+            else []
+        ),
+    }
+
+
+def _loading_message(card: dict | None) -> str:
+    if not card:
+        return ""
+    return (
+        f"正在执行{card['title']}：已完成 {card['done']}/{card['total']}，"
+        f"成功 {card['counts']['success']}，失败 {card['counts']['failed']}，"
+        f"无需执行 {card['counts']['skipped']}"
+    )
+
+
+def build_status(storage: Storage, *, kind: str = "") -> dict:
+    state = refresh_state(storage)
+    active_kind = str(state.get("active_kind") or "")
+    requested_kind = str(kind or active_kind)
+    if requested_kind and requested_kind not in TASKS:
+        raise ValueError("Unknown global execution task")
+
+    card = None
+    if requested_kind:
+        card = _card_view(
+            requested_kind,
+            state["batches"].get(requested_kind),
+            state["schedules"][requested_kind],
+        )
+    active_card = card if requested_kind == active_kind else None
+    if active_kind and active_card is None:
+        active_card = _card_view(
+            active_kind,
+            state["batches"].get(active_kind),
+            state["schedules"][active_kind],
+        )
+    return {
+        "active": bool(active_kind),
+        "active_kind": active_kind,
+        "loading_message": _loading_message(active_card),
+        "card": card,
     }
 
 
@@ -901,20 +1098,13 @@ def build_dashboard(storage: Storage) -> dict:
             state["batches"].get(kind),
             state["schedules"][kind],
         )
-        for kind in ("estate", "tianji", "pagoda", "beast_merge")
+        for kind in TASK_ORDER
     ]
     active_kind = state.get("active_kind") or ""
     active_card = next((card for card in cards if card["kind"] == active_kind), None)
-    loading_message = ""
-    if active_card:
-        loading_message = (
-            f"正在执行{active_card['title']}：已完成 {active_card['done']}/{active_card['total']}，"
-            f"成功 {active_card['counts']['success']}，失败 {active_card['counts']['failed']}，"
-            f"无需执行 {active_card['counts']['skipped']}"
-        )
     return {
         "active": bool(active_kind),
         "active_kind": active_kind,
-        "loading_message": loading_message,
+        "loading_message": _loading_message(active_card),
         "cards": cards,
     }

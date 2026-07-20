@@ -35,7 +35,7 @@
         }
     })();
     </script>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260715-jade-profile-artifact-tier-v1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260719-web-performance-p1-v1">
 </head>
 <body>
 {% set current_path = request.url.path %}
@@ -302,7 +302,7 @@
         </form>
     </div>
 </dialog>
-<script src="{{ url_for('static', path='/app.js') }}?v=20260718-profile-switch-single-loading-v1"></script>
+<script src="{{ url_for('static', path='/app.js') }}?v=20260719-web-performance-p3-v1"></script>
 <script>
 const sectTreasuryItems = [
     {% for item in sect_treasury_items or [] %}

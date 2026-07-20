@@ -166,7 +166,11 @@ def build_tianxing_reward_marker_days(
 
 
 def build_tianxing_today_exploration_rewards(
-    storage: Storage, profile_id: int, now=None, day_key: str = ""
+    storage: Storage,
+    profile_id: int,
+    now=None,
+    day_key: str = "",
+    marked_day_keys: list[str] | None = None,
 ) -> dict:
     current_time = float(time.time() if now is None else now)
     today_key = get_day_key(current_time)
@@ -320,6 +324,14 @@ def build_tianxing_today_exploration_rewards(
     ]
     totals["items"] = items
     totals["items_text"] = "、".join(item["text"] for item in items) if items else "-"
+    marker_days = (
+        list(marked_day_keys)
+        if marked_day_keys is not None
+        else build_tianxing_reward_marker_days(storage, profile_id, now=current_time)
+    )
+    if entries and selected_day_key not in marker_days:
+        marker_days.append(selected_day_key)
+        marker_days.sort()
     return {
         "day_key": selected_day_key,
         "today_key": today_key,
@@ -341,9 +353,7 @@ def build_tianxing_today_exploration_rewards(
             if selected_day_key == today_key
             else "暂无该日探索收益记录。"
         ),
-        "marked_day_keys": build_tianxing_reward_marker_days(
-            storage, profile_id, now=current_time
-        ),
+        "marked_day_keys": marker_days,
         "summary": totals,
         "entries": entries,
     }

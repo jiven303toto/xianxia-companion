@@ -4442,6 +4442,33 @@ class Storage:
                 ).fetchone()
         return dict(row) if row else None
 
+    def get_bound_messages_by_message_ids(
+        self,
+        chat_id: int,
+        message_ids: list[int],
+        profile_id: Optional[int] = None,
+    ) -> dict[int, dict]:
+        normalized_ids = sorted({int(message_id) for message_id in message_ids if message_id})
+        if not normalized_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in normalized_ids)
+        query = (
+            "SELECT * FROM bound_messages "
+            f"WHERE chat_id=? AND message_id IN ({placeholders})"
+        )
+        params = [int(chat_id), *normalized_ids]
+        if profile_id is not None:
+            query += " AND profile_id=?"
+            params.append(int(profile_id))
+        query += " ORDER BY message_id ASC, id DESC"
+        with self.connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        messages = {}
+        for row in rows:
+            row_dict = dict(row)
+            messages.setdefault(int(row_dict["message_id"]), row_dict)
+        return messages
+
     def is_known_bot_sender(
         self,
         chat_id: int,
@@ -4624,19 +4651,33 @@ class Storage:
                 command_params.append(normalized_sender_username)
             command_query += " ORDER BY created_at DESC, id DESC LIMIT 20"
             command_rows = conn.execute(command_query, command_params).fetchall()
+            command_message_ids = [
+                int(command_row["message_id"]) for command_row in command_rows
+            ]
+            if not command_message_ids:
+                return None
+            placeholders = ", ".join("?" for _ in command_message_ids)
+            reply_query = f"""
+                SELECT * FROM bound_messages
+                WHERE chat_id=? AND is_bot=1
+                  AND reply_to_msg_id IN ({placeholders})
+            """
+            reply_params = [int(chat_id), *command_message_ids]
+            if profile_id is not None:
+                reply_query += " AND profile_id=?"
+                reply_params.append(int(profile_id))
+            reply_query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
+            reply_rows = conn.execute(reply_query, reply_params).fetchall()
+            replies_by_command = {}
+            for reply_row in reply_rows:
+                replies_by_command.setdefault(
+                    int(reply_row["reply_to_msg_id"]),
+                    dict(reply_row),
+                )
             for command_row in command_rows:
-                reply_query = """
-                    SELECT * FROM bound_messages
-                    WHERE chat_id=? AND is_bot=1 AND reply_to_msg_id=?
-                """
-                reply_params = [int(chat_id), int(command_row["message_id"])]
-                if profile_id is not None:
-                    reply_query += " AND profile_id=?"
-                    reply_params.append(int(profile_id))
-                reply_query += " ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1"
-                reply_row = conn.execute(reply_query, reply_params).fetchone()
-                if reply_row:
-                    return dict(reply_row)
+                reply = replies_by_command.get(int(command_row["message_id"]))
+                if reply:
+                    return reply
         return None
 
     def get_latest_bot_reply_message(

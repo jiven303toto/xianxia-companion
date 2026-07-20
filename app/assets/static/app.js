@@ -14,8 +14,13 @@ const jadeLoadingAssetUrls = [
 let jadeLoadingAssetsPromise = null;
 let jadeLoadingAssetsReady = false;
 const globalLoadingMinimumFrameMs = 220;
-const profileRefreshLoadingHoldMs = 1200;
+const profileRefreshLoadingHoldMs = 160;
 const profileSwitchRefreshStorageKey = 'profile-switch-refresh-needed';
+const queuedSecondTickers = Array.isArray(window.appSecondTickers)
+    ? window.appSecondTickers.slice()
+    : [];
+const secondTickerCallbacks = new Set();
+let secondTickerIntervalId = null;
 
 function decodeImageElement(image) {
     return new Promise((resolve) => {
@@ -189,6 +194,50 @@ function hideGlobalLoading(overlay = document.getElementById('global-loading-ove
     document.documentElement.removeAttribute('aria-busy');
 }
 
+function unregisterSecondTicker(callback) {
+    secondTickerCallbacks.delete(callback);
+    if (!secondTickerCallbacks.size && secondTickerIntervalId !== null) {
+        window.clearInterval(secondTickerIntervalId);
+        secondTickerIntervalId = null;
+    }
+}
+
+function runSecondTickers() {
+    if (document.hidden) return;
+    secondTickerCallbacks.forEach((callback) => callback());
+}
+
+function registerSecondTicker(callback) {
+    if (typeof callback !== 'function') return;
+    secondTickerCallbacks.add(callback);
+    if (secondTickerIntervalId === null) {
+        secondTickerIntervalId = window.setInterval(runSecondTickers, 1000);
+    }
+}
+
+function waitForDocumentVisible() {
+    if (!document.hidden) return Promise.resolve();
+    return new Promise((resolve) => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) return;
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            resolve();
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+    });
+}
+
+window.appSecondTickers = {
+    push(callback) {
+        registerSecondTicker(callback);
+        return secondTickerCallbacks.size;
+    },
+};
+queuedSecondTickers.forEach(registerSecondTicker);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) runSecondTickers();
+});
+
 function formatCountdown(seconds) {
     const safe = Math.max(0, Math.floor(seconds));
     if (safe <= 0) return '已到期';
@@ -206,7 +255,12 @@ function mountCountdowns(root = document) {
     const items = Array.from(root.querySelectorAll('[data-countdown-target]'));
     if (!items.length) return;
 
+    let unregister = null;
     const tick = () => {
+        if (root instanceof Element && !root.isConnected) {
+            if (unregister) unregister();
+            return;
+        }
         const now = Date.now() / 1000;
         items.forEach((item) => {
             const target = Number(item.dataset.countdownTarget || 0);
@@ -219,13 +273,8 @@ function mountCountdowns(root = document) {
     };
 
     tick();
-    const intervalId = window.setInterval(() => {
-        if (root instanceof Element && !root.isConnected) {
-            window.clearInterval(intervalId);
-            return;
-        }
-        tick();
-    }, 1000);
+    registerSecondTicker(tick);
+    unregister = () => unregisterSecondTicker(tick);
 }
 
 function mountGlobalLoadingForms() {
@@ -456,10 +505,15 @@ function mountNavigationTransitions() {
             content.classList.add('is-route-exiting', 'is-route-loading');
             document.body.classList.add('is-route-navigating', 'is-global-loading');
             document.documentElement.setAttribute('aria-busy', 'true');
-            showGlobalLoading(overlay, message, '正在切换')
-                .then(() => {
-                    window.location.href = targetUrl.href;
-                });
+            if (message) {
+                message.textContent = '正在切换';
+            }
+            if (overlay) {
+                overlay.hidden = false;
+            }
+            waitForNextPaint().then(() => {
+                window.location.href = targetUrl.href;
+            });
         });
     });
 
@@ -1116,6 +1170,7 @@ function mountBrandSloganCarousel() {
     const transitionMs = 260;
 
     const swap = () => {
+        if (document.hidden) return;
         slogan.classList.add('is-switching');
         window.setTimeout(() => {
             index = (index + 1) % slogans.length;
@@ -1216,6 +1271,20 @@ function mountAdminGlobalExecution() {
     const overlay = document.getElementById('global-loading-overlay');
     const message = document.getElementById('global-loading-message');
     let polling = false;
+    let currentKind = root.dataset.activeKind || '';
+    let pollDelayMs = 1000;
+    let previousProgressKey = '';
+    const maxPollDelayMs = 4000;
+
+    root.querySelectorAll('[data-admin-execution-strategy-select]').forEach((select) => {
+        if (!(select instanceof HTMLSelectElement)) return;
+        const kind = select.dataset.adminExecutionStrategySelect || '';
+        const input = root.querySelector(`[data-admin-execution-strategy-input="${kind}"]`);
+        if (!(input instanceof HTMLInputElement)) return;
+        const sync = () => { input.value = select.value; };
+        select.addEventListener('change', sync);
+        sync();
+    });
 
     const setButtonsDisabled = (disabled) => {
         buttons.forEach((button) => {
@@ -1223,26 +1292,123 @@ function mountAdminGlobalExecution() {
         });
     };
 
+    const renderCard = (card) => {
+        if (!card || !card.kind) return;
+        const cardRoot = root.querySelector(`[data-admin-execution-card="${card.kind}"]`);
+        if (!(cardRoot instanceof HTMLElement)) return;
+
+        const status = cardRoot.querySelector('[data-admin-execution-status]');
+        if (status instanceof HTMLElement) {
+            status.className = `admin-execution-status is-${card.status}`;
+            status.textContent = card.status_label || '';
+        }
+        const summaryValues = {
+            started_at: card.started_at || '—',
+            success: card.counts?.success ?? 0,
+            failed: card.counts?.failed ?? 0,
+            skipped: card.counts?.skipped ?? 0,
+        };
+        Object.entries(summaryValues).forEach(([key, value]) => {
+            const target = cardRoot.querySelector(`[data-admin-execution-summary="${key}"]`);
+            if (target instanceof HTMLElement) target.textContent = String(value);
+        });
+
+        const report = cardRoot.querySelector('[data-admin-execution-report]');
+        const reportSummary = cardRoot.querySelector('[data-admin-execution-report-summary]');
+        const reportBody = cardRoot.querySelector('[data-admin-execution-report-body]');
+        if (report instanceof HTMLDetailsElement && card.status === 'running') {
+            report.open = true;
+        }
+        if (reportSummary instanceof HTMLElement) {
+            reportSummary.textContent = `元神执行录（${card.done || 0}/${card.total || 0}）`;
+        }
+        if (!(reportBody instanceof HTMLElement)) return;
+
+        const items = Array.isArray(card.items) ? card.items : [];
+        if (items.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'muted top-gap';
+            empty.textContent = '暂无执行记录。';
+            reportBody.replaceChildren(empty);
+            return;
+        }
+
+        const table = document.createElement('div');
+        table.className = 'admin-execution-report-table';
+        const header = document.createElement('div');
+        header.className = 'admin-execution-report-row is-header';
+        ['元神', '结果', '奖励'].forEach((label) => {
+            const cell = document.createElement('span');
+            cell.textContent = label;
+            header.appendChild(cell);
+        });
+        table.appendChild(header);
+        items.forEach((item) => {
+            const row = document.createElement('div');
+            row.className = 'admin-execution-report-row';
+            const name = document.createElement('strong');
+            name.textContent = item.profile_name || '';
+            const result = document.createElement('span');
+            result.className = `admin-execution-result is-${item.status || 'queued'}`;
+            result.textContent = item.status_label || '';
+            const reward = document.createElement('span');
+            reward.textContent = item.reward || '—';
+            row.append(name, result, reward);
+            table.appendChild(row);
+        });
+        reportBody.replaceChildren(table);
+    };
+
+    const progressKey = (state) => {
+        const card = state.card || {};
+        return JSON.stringify([
+            state.active_kind || '',
+            card.status || '',
+            card.done || 0,
+            Array.isArray(card.items)
+                ? card.items.map((item) => [item.status, item.status_label, item.reward])
+                : [],
+        ]);
+    };
+
+    const updatePollDelay = (state) => {
+        const nextProgressKey = progressKey(state);
+        pollDelayMs = nextProgressKey === previousProgressKey
+            ? Math.min(maxPollDelayMs, pollDelayMs + 1000)
+            : 1000;
+        previousProgressKey = nextProgressKey;
+    };
+
     const poll = async () => {
         if (polling || !statusUrl) return;
         polling = true;
         try {
             while (true) {
-                const response = await fetch(statusUrl, {
+                await new Promise((resolve) => window.setTimeout(resolve, pollDelayMs));
+                await waitForDocumentVisible();
+                const statusRequestUrl = new URL(statusUrl, window.location.href);
+                if (currentKind) statusRequestUrl.searchParams.set('kind', currentKind);
+                const response = await fetch(statusRequestUrl, {
                     credentials: 'same-origin',
                     headers: { Accept: 'application/json' },
                 });
                 if (!response.ok) throw new Error(`Status request failed: ${response.status}`);
                 const state = await response.json();
+                renderCard(state.card);
                 if (message && state.loading_message) {
                     message.textContent = state.loading_message;
                 }
                 if (!state.active) {
+                    root.dataset.active = '0';
+                    root.dataset.activeKind = '';
                     hideGlobalLoading(overlay);
-                    window.location.reload();
+                    setButtonsDisabled(false);
                     return;
                 }
-                await new Promise((resolve) => window.setTimeout(resolve, 1500));
+                currentKind = state.active_kind || currentKind;
+                root.dataset.active = '1';
+                root.dataset.activeKind = currentKind;
+                updatePollDelay(state);
             }
         } catch (_error) {
             hideGlobalLoading(overlay);
@@ -1253,9 +1419,24 @@ function mountAdminGlobalExecution() {
         }
     };
 
-    const startPolling = async (loadingMessage) => {
+    const startPolling = async (state) => {
+        currentKind = state.active_kind || state.card?.kind || currentKind;
+        renderCard(state.card);
+        root.dataset.active = state.active ? '1' : '0';
+        root.dataset.activeKind = currentKind;
+        if (!state.active) {
+            hideGlobalLoading(overlay);
+            setButtonsDisabled(false);
+            return;
+        }
         setButtonsDisabled(true);
-        await showGlobalLoading(overlay, message, loadingMessage || '正在执行全局任务');
+        pollDelayMs = 1000;
+        previousProgressKey = progressKey(state);
+        await showGlobalLoading(
+            overlay,
+            message,
+            state.loading_message || '正在执行全局任务',
+        );
         poll();
     };
 
@@ -1269,6 +1450,7 @@ function mountAdminGlobalExecution() {
                 const response = await fetch(form.action, {
                     method: 'POST',
                     credentials: 'same-origin',
+                    body: new FormData(form),
                     headers: {
                         Accept: 'application/json',
                         'X-Requested-With': 'XMLHttpRequest',
@@ -1278,7 +1460,8 @@ function mountAdminGlobalExecution() {
                 if (!response.ok) {
                     throw new Error(state.detail || `Start request failed: ${response.status}`);
                 }
-                await startPolling(state.loading_message);
+                currentKind = form.dataset.adminExecutionKind || state.active_kind || '';
+                await startPolling(state);
             } catch (error) {
                 setButtonsDisabled(false);
                 window.alert(error instanceof Error ? error.message : '全局任务启动失败。');
@@ -1287,7 +1470,12 @@ function mountAdminGlobalExecution() {
     });
 
     if (root.dataset.active === '1') {
-        startPolling(root.dataset.loadingMessage || '正在执行全局任务');
+        startPolling({
+            active: true,
+            active_kind: currentKind,
+            loading_message: root.dataset.loadingMessage || '正在执行全局任务',
+            card: null,
+        });
     }
 }
 

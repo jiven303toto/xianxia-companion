@@ -22,11 +22,16 @@ def mulan_message_has_current_profile_parent(
     chat_id: int,
     thread_id: Optional[int],
     command_texts: set[str],
+    parent_messages: Optional[dict[int, dict]] = None,
 ) -> bool:
     reply_to_msg_id = int((message or {}).get("reply_to_msg_id") or 0)
     if reply_to_msg_id <= 0:
         return False
-    parent = storage.get_bound_message(chat_id, reply_to_msg_id, profile_id)
+    parent = (
+        parent_messages.get(reply_to_msg_id)
+        if parent_messages is not None
+        else storage.get_bound_message(chat_id, reply_to_msg_id, profile_id)
+    )
     if not parent or int(parent.get("is_bot") or 0):
         return False
     if str(parent.get("direction") or "").strip() != "outgoing":
@@ -52,6 +57,16 @@ def find_latest_mulan_message(
             search_query=query,
             limit=80,
         )
+        parent_messages = storage.get_bound_messages_by_message_ids(
+            chat_id,
+            [
+                int(message.get("reply_to_msg_id") or 0)
+                for message in messages
+                if int(message.get("is_bot") or 0)
+                and mulan_message_matches_thread(message, thread_id)
+            ],
+            profile_id,
+        )
         for message in messages:
             if not int(message.get("is_bot") or 0):
                 continue
@@ -64,6 +79,7 @@ def find_latest_mulan_message(
                 chat_id=chat_id,
                 thread_id=thread_id,
                 command_texts=command_texts,
+                parent_messages=parent_messages,
             ):
                 continue
             text = str(message.get("text") or "").strip()

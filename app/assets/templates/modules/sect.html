@@ -435,6 +435,7 @@
             <article class="xinggong-plot-card"
                      data-plot-id="{{ plot.plot_id }}"
                      data-remaining-seconds="{{ cooldown_remaining }}"
+                     data-countdown-target="{{ now_ts + cooldown_remaining }}"
                      data-total-seconds="{{ cooldown_total }}"
                      data-is-ready="{{ '1' if plot.is_ready else '0' }}"
                      data-is-collectable="{{ '1' if plot.collectable else '0' }}"
@@ -506,13 +507,14 @@
             function updateCard(card) {
                 var isCollectable = card.getAttribute('data-is-collectable') === '1';
                 if (isCollectable) return;
-                var remaining = parseInt(card.getAttribute('data-remaining-seconds') || '0', 10);
+                var previousRemaining = parseInt(card.getAttribute('data-remaining-seconds') || '0', 10);
+                var target = Number(card.getAttribute('data-countdown-target') || 0);
+                var remaining = Math.max(Math.ceil(target - (Date.now() / 1000)), 0);
                 var total = parseInt(card.getAttribute('data-total-seconds') || '0', 10);
                 var isReady = card.getAttribute('data-is-ready') === '1';
                 if (isReady) return;
                 var needsComfort = card.getAttribute('data-needs-comfort') === '1';
-                if (remaining <= 0 && total > 0) return;
-                remaining = Math.max(remaining - 1, 0);
+                if (remaining <= 0 && previousRemaining <= 0 && total > 0) return;
                 card.setAttribute('data-remaining-seconds', remaining);
                 var timeEl = card.querySelector('.xinggong-time-text');
                 var pctEl = card.querySelector('.xinggong-pct-text');
@@ -540,7 +542,8 @@
                     updateCard(plots[i]);
                 }
             }
-            setInterval(tickAll, 1000);
+            window.appSecondTickers = window.appSecondTickers || [];
+            window.appSecondTickers.push(tickAll);
         })();
         </script>
         {% endif %}
@@ -649,6 +652,7 @@
                 <span>CD倒计时</span>
                 <strong class="companion-assist-countdown"
                         data-remaining-seconds="{{ xinggong_state.companion_assist_cooldown_remaining_seconds or 0 }}"
+                        data-countdown-target="{{ xinggong_state.companion_assist_cooldown_end_time or 0 }}"
                         style="font-family: var(--font-mono); color: {% if xinggong_state.companion_assist_cooldown_remaining_seconds %}var(--accent-gold){% else %}var(--accent-green){% endif %};">
                     {{ xinggong_state.companion_assist_cooldown_remaining_display or '可助阵' }}
                 </strong>
@@ -700,6 +704,7 @@
                 <span>Buff倒计时</span>
                 <strong class="star-formation-buff-countdown"
                         data-remaining-seconds="{{ xinggong_state.star_formation_view.active_buff_remaining_seconds or 0 }}"
+                        data-countdown-target="{{ xinggong_state.star_formation_view.active_buff_expiry_time or 0 }}"
                         style="font-family: var(--font-mono); color: {% if xinggong_state.star_formation_view.active_buff_remaining_seconds %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
                     {{ xinggong_state.star_formation_view.active_buff_remaining_display or '已结束' }}
                 </strong>
@@ -730,14 +735,14 @@
         var nodes = document.querySelectorAll(selector);
         for (var i = 0; i < nodes.length; i++) {
             var el = nodes[i];
-            var remaining = Math.max(parseInt(el.getAttribute('data-remaining-seconds') || '0', 10), 0);
+            var target = Number(el.getAttribute('data-countdown-target') || 0);
+            var remaining = Math.max(Math.ceil(target - (Date.now() / 1000)), 0);
+            el.setAttribute('data-remaining-seconds', remaining);
             el.textContent = fmtCountdown(remaining, readyText);
             if (remaining <= 0) {
                 if (readyColor) el.style.color = readyColor;
                 continue;
             }
-            remaining = Math.max(remaining - 1, 0);
-            el.setAttribute('data-remaining-seconds', remaining);
         }
     }
     function tickAll() {
@@ -752,7 +757,8 @@
         }
     }
     tickAll();
-    setInterval(tickAll, 1000);
+    window.appSecondTickers = window.appSecondTickers || [];
+    window.appSecondTickers.push(tickAll);
 })();
 </script>
 {% endif %}

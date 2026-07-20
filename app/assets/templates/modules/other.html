@@ -75,41 +75,7 @@
             <div class="kv-row"><span>上次历练</span><strong>{{ wild_experience_state.last_experience_display }}</strong></div>
         </div>
 
-        <form class="form-grid top-gap" method="post" action="/runtime/commands/wild-experience-auto">
-            <input type="hidden" name="chat_id" value="{{ bound_chat_id or '' }}">
-            <input type="hidden" name="thread_id" value="{{ bound_thread_id or '' }}">
-            <input type="hidden" name="chat_type" value="{{ bound_chat_type or 'group' }}">
-            <input type="hidden" name="bot_username" value="{{ bound_bot_username or 'fanrenxiuxian_bot' }}">
-            <input type="hidden" name="redirect_to" value="/modules/other">
-            {% if wild_experience_state.active %}
-                <label>
-                    历练策略
-                    <input value="{{ wild_experience_state.strategy }}" disabled>
-                </label>
-                <input type="hidden" name="strategy" value="{{ wild_experience_state.strategy }}">
-                <div class="action-row" style="align-items: end;">
-                    <button type="submit" class="inline-button auto-toggle-button active" {% if not command_chat_ready %}disabled{% endif %}>停止自动历练</button>
-                </div>
-                <p class="muted full-span" style="font-size: 0.9em;">自动历练运行中。如需修改策略，请先关闭自动历练。</p>
-            {% else %}
-                <label>
-                    历练策略
-                    <select name="strategy" {% if not command_chat_ready %}disabled{% endif %}>
-                        {% for option in wild_experience_state.strategy_options %}
-                            <option value="{{ option }}" {% if wild_experience_state.strategy == option %}selected{% endif %}>{{ option }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <div class="action-row" style="align-items: end;">
-                    <button type="submit" class="inline-button auto-toggle-button" {% if not command_chat_ready %}disabled{% endif %}>开启自动历练</button>
-                </div>
-                <p class="muted full-span" style="font-size: 0.9em;">发送指令示例：{{ wild_experience_state.command_preview }}。执行前会先强制刷新一次天机阁接口确认冷却。</p>
-            {% endif %}
-        </form>
-
-        {% if wild_experience_state.last_error %}
-            <p class="muted top-gap">自动历练：{{ wild_experience_state.last_error }}</p>
-        {% endif %}
+        <p class="muted top-gap">群命令野外历练已失效。当前功能已迁移到“诸元神巡令”，统一选择谨慎、均衡或深入策略，并通过公共洞府 MiniApp 执行全部 Profile。</p>
     </div>
         </section>
 

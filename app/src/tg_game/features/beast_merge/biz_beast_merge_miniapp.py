@@ -675,6 +675,7 @@ async def resolve_beast_merge_public_launch(
     storage: object,
     *,
     transport=None,
+    sleeper=time.sleep,
 ) -> dict:
     discovery = await estate_miniapp.resolve_estate_public_miniapp_launch(client, storage)
     if not discovery.get("ok"):
@@ -686,6 +687,7 @@ async def resolve_beast_merge_public_launch(
             token=launch.get("token"),
             webview_url=launch.get("webview_url"),
             bot_username=launch.get("bot_username"),
+            launch_context=launch,
         )
     except Exception as exc:
         return {"ok": False, "error": _safe_text(exc)}
@@ -694,15 +696,26 @@ async def resolve_beast_merge_public_launch(
         token=launch.get("token"),
         init_data=init_data,
     )
-    estate_result = estate_miniapp.execute_estate_miniapp_request(
+    lookup = await asyncio.to_thread(
+        estate_miniapp.execute_estate_external_app_lookup,
         estate_request,
         transport or _urllib_transport,
+        extract_beast_merge_launch,
+        action="beast_merge",
+        sleeper=sleeper,
     )
+    estate_result = lookup.get("result") or {}
     if not estate_result.get("ok"):
         return {"ok": False, "error": _safe_text(estate_result.get("error") or "洞府状态读取失败")}
-    beast_launch = extract_beast_merge_launch(estate_result.get("data"))
+    beast_launch = lookup.get("launch") or {}
     if not beast_launch:
-        return {"ok": False, "error": "公共洞府未返回噬金虫入口"}
+        return {
+            "ok": False,
+            "error": (
+                f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                "未返回噬金虫入口"
+            ),
+        }
     return {
         "ok": True,
         "token": beast_launch["token"],
@@ -728,6 +741,7 @@ async def run_beast_merge_public_production_flow(
             client,
             discovery_storage,
             transport=transport,
+            sleeper=sleeper,
         )
         if not launch.get("ok"):
             return {"ok": False, "status_label": "公共洞府入口解析失败", "error": launch.get("error")}

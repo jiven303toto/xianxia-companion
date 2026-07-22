@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import re
+import time
 from urllib.parse import parse_qs, urljoin, urlsplit
 import urllib.request
 
@@ -18,6 +19,10 @@ PAGODA_ENDPOINTS = {
     "start": f"{PAGODA_API_PREFIX}start",
     "challenge": f"{PAGODA_API_PREFIX}challenge",
 }
+PAGODA_CHALLENGE_RESPONSE_WAIT_SECONDS = 90
+PAGODA_HTTP_RESPONSE_WAIT_SECONDS = 20
+PAGODA_SETTLEMENT_CONFIRM_SECONDS = 2 * 60
+PAGODA_SETTLEMENT_POLL_SECONDS = 10
 PAGODA_TOKEN_PATTERN = re.compile(
     r"^pagoda[_-][A-Za-z0-9_-]{4,160}$",
     re.IGNORECASE,
@@ -168,7 +173,9 @@ def _urllib_transport(request: dict):
         headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
         method=str(request.get("method") or "POST"),
     )
-    with urllib.request.urlopen(http_request, timeout=90) as response:
+    endpoint = str((request.get("safe_summary") or {}).get("endpoint") or "")
+    timeout_seconds = 90 if endpoint == "challenge" else PAGODA_HTTP_RESPONSE_WAIT_SECONDS
+    with urllib.request.urlopen(http_request, timeout=timeout_seconds) as response:
         return int(getattr(response, "status", 200) or 200), response.read()
 
 
@@ -263,6 +270,49 @@ def sanitize_pagoda_replay(value: object) -> dict:
     }
 
 
+def _finish_pagoda_challenge(start_state: dict, challenge_result: dict) -> dict:
+    challenge_data = challenge_result.get("data") or {}
+    final_state = (
+        sanitize_pagoda_state(challenge_data.get("state"))
+        if isinstance(challenge_data.get("state"), dict)
+        else start_state
+    )
+    replay = sanitize_pagoda_replay(challenge_data.get("replay"))
+    if not challenge_result.get("ok"):
+        return {
+            "ok": False,
+            "status": "failed",
+            "state": final_state,
+            "replay": replay,
+            "error": challenge_result.get("error"),
+        }
+    return {
+        "ok": True,
+        "status": "settled",
+        "state": final_state,
+        "replay": replay,
+        "error": "",
+    }
+
+
+def _is_timeout_error(value: object) -> bool:
+    text = str(value or "").lower()
+    return "timed out" in text or "timeout" in text or "超时" in text
+
+
+async def _execute_pagoda_request_async(request: dict, transport) -> dict:
+    task = asyncio.create_task(
+        asyncio.to_thread(execute_pagoda_request, request, transport)
+    )
+    try:
+        return await asyncio.wait_for(
+            asyncio.shield(task),
+            timeout=PAGODA_HTTP_RESPONSE_WAIT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return {"ok": False, "status_code": 0, "data": {}, "error": "http_timeout"}
+
+
 def run_pagoda_flow(*, token: str, init_data: str, transport, progress_callback=None) -> dict:
     if progress_callback is not None:
         progress_callback("start")
@@ -287,22 +337,98 @@ def run_pagoda_flow(*, token: str, init_data: str, transport, progress_callback=
         build_pagoda_request("challenge", token=token, init_data=init_data),
         transport,
     )
-    challenge_data = challenge_result.get("data") or {}
-    final_state = (
-        sanitize_pagoda_state(challenge_data.get("state"))
-        if isinstance(challenge_data.get("state"), dict)
-        else state
-    )
-    replay = sanitize_pagoda_replay(challenge_data.get("replay"))
-    if not challenge_result.get("ok"):
+    return _finish_pagoda_challenge(state, challenge_result)
+
+
+async def run_pagoda_flow_with_reconciliation(
+    *,
+    token: str,
+    init_data: str,
+    transport,
+    progress_callback=None,
+) -> dict:
+    start_request = build_pagoda_request("start", token=token, init_data=init_data)
+    if progress_callback is not None:
+        progress_callback("start")
+    start_result = await _execute_pagoda_request_async(start_request, transport)
+    state = sanitize_pagoda_state(start_result.get("data", {}).get("state"))
+    if not start_result.get("ok"):
         return {
             "ok": False,
             "status": "failed",
-            "state": final_state,
-            "replay": replay,
-            "error": challenge_result.get("error"),
+            "state": state,
+            "replay": {},
+            "error": start_result.get("error"),
         }
-    return {"ok": True, "status": "settled", "state": final_state, "replay": replay, "error": ""}
+    if not state.get("canChallenge"):
+        return {
+            "ok": True,
+            "status": "skipped",
+            "state": state,
+            "replay": {},
+            "error": "今日已闯塔，服务端当前不可再次挑战。",
+        }
+
+    if progress_callback is not None:
+        progress_callback("challenge")
+    challenge_task = asyncio.create_task(
+        asyncio.to_thread(
+            execute_pagoda_request,
+            build_pagoda_request("challenge", token=token, init_data=init_data),
+            transport,
+        )
+    )
+    challenge_result = None
+    last_error = "challenge 回包超时"
+    try:
+        challenge_result = await asyncio.wait_for(
+            asyncio.shield(challenge_task),
+            timeout=PAGODA_CHALLENGE_RESPONSE_WAIT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        pass
+    if challenge_result is not None:
+        result = _finish_pagoda_challenge(state, challenge_result)
+        if result.get("ok"):
+            return result
+        last_error = str(result.get("error") or last_error)
+
+    if progress_callback is not None:
+        progress_callback("settlement_confirm")
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + PAGODA_SETTLEMENT_CONFIRM_SECONDS
+    while True:
+        challenge_finished = challenge_task.done()
+        if challenge_finished:
+            challenge_result = challenge_task.result()
+            result = _finish_pagoda_challenge(state, challenge_result)
+            if result.get("ok"):
+                return result
+            last_error = str(result.get("error") or last_error)
+
+        confirm_result = await _execute_pagoda_request_async(start_request, transport)
+        confirmed_state = sanitize_pagoda_state(
+            confirm_result.get("data", {}).get("state")
+        )
+        if confirm_result.get("ok") and not confirmed_state.get("canChallenge"):
+            return {
+                "ok": True,
+                "status": "settled",
+                "state": confirmed_state,
+                "replay": {},
+                "error": "challenge 回包未完成，已通过 start 确认服务端完成；奖励明细未返回。",
+            }
+        if challenge_finished and not _is_timeout_error(last_error):
+            return result
+        if loop.time() >= deadline:
+            return {
+                "ok": False,
+                "status": "failed",
+                "state": confirmed_state or state,
+                "replay": {},
+                "error": f"{_safe_text(last_error)}；服务端结算确认超时。",
+            }
+        await asyncio.sleep(PAGODA_SETTLEMENT_POLL_SECONDS)
 
 
 async def resolve_pagoda_public_launch(
@@ -310,6 +436,7 @@ async def resolve_pagoda_public_launch(
     storage: object,
     *,
     transport=None,
+    sleeper=time.sleep,
 ) -> dict:
     discovery = await estate_miniapp.resolve_estate_public_miniapp_launch(client, storage)
     if not discovery.get("ok"):
@@ -321,6 +448,7 @@ async def resolve_pagoda_public_launch(
             token=estate_launch.get("token"),
             webview_url=estate_launch.get("webview_url"),
             bot_username=estate_launch.get("bot_username"),
+            launch_context=estate_launch,
         )
     except Exception as exc:
         return {"ok": False, "error": _safe_text(exc)}
@@ -329,15 +457,26 @@ async def resolve_pagoda_public_launch(
         token=estate_launch.get("token"),
         init_data=init_data,
     )
-    estate_result = estate_miniapp.execute_estate_miniapp_request(
+    lookup = await asyncio.to_thread(
+        estate_miniapp.execute_estate_external_app_lookup,
         estate_request,
         transport or estate_miniapp._urllib_transport,
+        extract_pagoda_launch,
+        action="pagoda",
+        sleeper=sleeper,
     )
+    estate_result = lookup.get("result") or {}
     if not estate_result.get("ok"):
         return {"ok": False, "error": _safe_text(estate_result.get("error") or "洞府状态读取失败")}
-    pagoda_launch = extract_pagoda_launch(estate_result.get("data"))
+    pagoda_launch = lookup.get("launch") or {}
     if not pagoda_launch:
-        return {"ok": False, "error": "公共洞府未返回琉璃问心塔入口"}
+        return {
+            "ok": False,
+            "error": (
+                f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                "未返回琉璃问心塔入口"
+            ),
+        }
     return {
         "ok": True,
         "token": pagoda_launch["token"],
@@ -353,17 +492,18 @@ async def run_pagoda_public_production_flow(
     discovery_storage: object,
     transport=None,
     progress_callback=None,
+    sleeper=time.sleep,
 ) -> dict:
     try:
         launch = await resolve_pagoda_public_launch(
             client,
             discovery_storage,
             transport=transport,
+            sleeper=sleeper,
         )
         if not launch.get("ok"):
             return {"ok": False, "status": "failed", "state": {}, "replay": {}, "error": launch.get("error")}
-        result = await asyncio.to_thread(
-            run_pagoda_flow,
+        result = await run_pagoda_flow_with_reconciliation(
             token=launch.get("token"),
             init_data=launch.get("init_data"),
             transport=transport or _urllib_transport,

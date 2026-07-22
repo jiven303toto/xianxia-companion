@@ -56,6 +56,7 @@ from tg_game.features.countdowns.biz_countdowns_view_model import (
     build_companion_voyage_countdown_items as _countdown_build_companion_voyage_countdown_items,
     build_countdown_item_for_now as _countdown_build_item_for_now,
     build_cultivation_countdown_items as _countdown_build_cultivation_countdown_items,
+    build_profile_rebirth_countdown_items as _countdown_build_profile_rebirth_countdown_items,
     build_sect_countdown_items as _countdown_build_sect_countdown_items,
     build_small_world_countdown_items as _countdown_build_small_world_countdown_items,
     build_tianxing_countdown_items as _countdown_build_tianxing_countdown_items,
@@ -405,6 +406,7 @@ __all__ = [
     '_build_countdown_item',
     '_build_cultivation_countdown_items',
     '_build_companion_voyage_countdown_items',
+    '_build_profile_rebirth_countdown_items',
     '_build_auto_task_countdown_items',
     '_build_xinggong_slot_countdown_items',
     '_build_wanling_roam_state',
@@ -936,6 +938,13 @@ def _build_cultivation_countdown_items(cultivation_session: Optional[dict]) -> l
 def _build_companion_voyage_countdown_items(voyage_state: Optional[dict]) -> list[dict]:
     return _countdown_build_companion_voyage_countdown_items(
         voyage_state,
+        now_ts=biz_fanren_game.time.time(),
+    )
+
+
+def _build_profile_rebirth_countdown_items(rebirth_state: Optional[dict]) -> list[dict]:
+    return _countdown_build_profile_rebirth_countdown_items(
+        rebirth_state,
         now_ts=biz_fanren_game.time.time(),
     )
 

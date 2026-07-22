@@ -944,22 +944,34 @@ async def run_tianji_trial_public_miniapp_production_flow(
             token=estate_launch.get("token"),
             webview_url=estate_launch.get("webview_url"),
             bot_username=estate_launch.get("bot_username"),
+            launch_context=estate_launch,
         )
         request = estate_miniapp.build_estate_miniapp_request(
             "start",
             token=estate_launch.get("token"),
             init_data=init_data,
         )
-        start_result = await asyncio.to_thread(
-            estate_miniapp.execute_estate_miniapp_request,
+        lookup = await asyncio.to_thread(
+            estate_miniapp.execute_estate_external_app_lookup,
             request,
             transport or estate_miniapp._urllib_transport,
+            extract_public_tianji_trial_launch,
+            action="tianji_trial",
+            sleeper=sleeper or time.sleep,
         )
+        start_result = lookup.get("result") or {}
         if not start_result.get("ok"):
             return _flow_result(False, "failed", error=start_result.get("error"))
-        trial_launch = extract_public_tianji_trial_launch(start_result.get("data") or {})
+        trial_launch = lookup.get("launch") or {}
         if not trial_launch:
-            return _flow_result(False, "failed", error="洞府公共入口未返回天机试炼链接")
+            return _flow_result(
+                False,
+                "failed",
+                error=(
+                    f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                    "未返回天机试炼链接"
+                ),
+            )
         result = await asyncio.to_thread(
             run_tianji_trial_miniapp_batch_flow,
             token=trial_launch.get("token"),

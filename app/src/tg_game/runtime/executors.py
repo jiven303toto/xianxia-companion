@@ -70,6 +70,7 @@ from tg_game.features.companion.biz_companion_voyage import (
 from tg_game.features.beast_merge import biz_beast_merge_daily_auto
 from tg_game.features.beast_merge import biz_beast_merge_miniapp as beast_merge_miniapp
 from tg_game.features.beast_merge import biz_beast_merge_state
+from tg_game.features.battle import biz_battle_schedule
 from tg_game.features.estate import biz_estate_miniapp as estate_miniapp
 from tg_game.features.estate import biz_estate_hunt_daily_auto
 from tg_game.features.estate.biz_estate_miniapp import (
@@ -143,7 +144,11 @@ from tg_game.features.wanling.biz_wanling_roam import (
     resolve_wanling_roam_next_finish_at,
 )
 from tg_game.services.cultivation_sync import sync_cultivation_session
-from tg_game.services.external_sync import ASC_PROVIDER, read_cached_external_payload
+from tg_game.services.external_sync import (
+    ASC_PROVIDER,
+    is_authorized_profile,
+    read_cached_external_payload,
+)
 from tg_game.services import profile_rebirth
 from tg_game.storage import (
     OUTGOING_CONFIRM_TIMEOUT_SECONDS,
@@ -847,14 +852,9 @@ async def _run_pending_pagoda_public(
             progress_callback=mark_running,
         )
     )
-    while True:
-        try:
-            result = await asyncio.wait_for(
-                asyncio.shield(flow_task),
-                timeout=PAGODA_LEASE_RENEW_INTERVAL_SECONDS,
-            )
-            break
-        except asyncio.TimeoutError:
+    async def renew_lease() -> None:
+        nonlocal current_payload
+        while not flow_task.done():
             try:
                 current_payload = _update_external_payload(
                     storage,
@@ -870,6 +870,16 @@ async def _run_pending_pagoda_public(
                     profile_id,
                     exc,
                 )
+            await asyncio.sleep(PAGODA_LEASE_RENEW_INTERVAL_SECONDS)
+    renewal_task = asyncio.create_task(renew_lease())
+    try:
+        result = await flow_task
+    finally:
+        renewal_task.cancel()
+        try:
+            await renewal_task
+        except asyncio.CancelledError:
+            pass
     if not result.get("ok"):
         logger.warning(
             "Pagoda public MiniApp flow failed: %s",
@@ -6720,6 +6730,40 @@ async def _run_companion_auto_scheduler(
             await asyncio.sleep(10)
 
 
+async def _run_admin_battle_scheduler(
+    client: object,
+    storage: Storage,
+    *,
+    run_once: bool = False,
+) -> None:
+    profile_id = int(getattr(client, "_tg_game_profile_id", 0) or 0)
+    profile = storage.get_profile(profile_id) if profile_id else None
+    if not is_authorized_profile(storage, profile):
+        return
+
+    while True:
+        try:
+            biz_battle_schedule.tick(
+                storage,
+                storage.list_profiles(),
+                admin_profile_id=profile_id,
+            )
+            if run_once:
+                return
+            await asyncio.sleep(biz_battle_schedule.POLL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Admin battle scheduler error for profile=%s: %s",
+                profile_id,
+                exc,
+            )
+            if run_once:
+                raise
+            await asyncio.sleep(10)
+
+
 async def _run_divination_batch_scheduler(
     client: object, storage: Storage, *, run_once: bool = False
 ) -> None:
@@ -8606,6 +8650,13 @@ class GeneralGameExecutor(BaseExecutor):
             client,
             asyncio.create_task(_run_companion_heart_tribulation_scheduler(client, storage)),
         )
+        profile_id = int(getattr(client, "_tg_game_profile_id", 0) or 0)
+        profile = storage.get_profile(profile_id) if profile_id else None
+        if is_authorized_profile(storage, profile):
+            _register_client_background_task(
+                client,
+                asyncio.create_task(_run_admin_battle_scheduler(client, storage)),
+            )
         return
 
     async def handle(self, context: EventContext, storage: Storage) -> bool:

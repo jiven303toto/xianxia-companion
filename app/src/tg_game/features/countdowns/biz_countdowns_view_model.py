@@ -219,6 +219,34 @@ def build_companion_voyage_countdown_items(
     ]
 
 
+def build_profile_rebirth_countdown_items(
+    rebirth_state: Optional[dict], *, now_ts: Optional[float] = None
+) -> list[dict]:
+    state = rebirth_state or {}
+    target_ts = float(state.get("retry_at") or 0)
+    if not bool(state.get("active")) or target_ts <= 0:
+        return []
+    detail = (
+        "神魂温养中，到点自动重试夺舍"
+        if str(state.get("stage") or "").strip() == "cooldown"
+        else "夺舍恢复中，到点自动重试"
+    )
+    return [
+        build_countdown_item_for_now(
+            title="夺舍重生",
+            module_name="残魂恢复",
+            href="/modules/other",
+            status="恢复倒计时",
+            target_ts=target_ts,
+            detail=detail,
+            badge="自动恢复",
+            tone="rebirth",
+            ready_text="可重试",
+            now_ts=now_ts,
+        )
+    ]
+
+
 def build_auto_task_countdown_items(
     tasks: list[dict],
     *,

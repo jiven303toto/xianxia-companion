@@ -1045,19 +1045,30 @@ def run_fishing_miniapp_public_flow(
         token=estate_token,
         init_data=init_data,
     )
-    dwelling_result = estate_miniapp.execute_estate_miniapp_request(
+    lookup = estate_miniapp.execute_estate_external_app_lookup(
         dwelling_request,
         transport,
+        extract_public_fishing_launch,
+        action="fishing",
+        sleeper=sleeper or time.sleep,
     )
+    dwelling_result = lookup.get("result") or {}
     if not dwelling_result.get("ok"):
         return _flow_result(
             False,
             "failed",
             error=dwelling_result.get("error") or "公共洞府入口启动失败。",
         )
-    launch = extract_public_fishing_launch(dwelling_result.get("data") or {})
+    launch = lookup.get("launch") or {}
     if not launch:
-        return _flow_result(False, "failed", error="公共洞府未返回灵溪垂钓入口。")
+        return _flow_result(
+            False,
+            "failed",
+            error=(
+                f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                "未返回灵溪垂钓入口。"
+            ),
+        )
     result = run_fishing_miniapp_loop_flow(
         token=launch.get("token"),
         init_data=init_data,
@@ -1153,6 +1164,7 @@ async def run_fishing_miniapp_public_production_flow(
             client,
             token=launch.get("token"),
             webview_url=launch.get("webview_url"),
+            launch_context=launch,
         )
         return await asyncio.to_thread(
             run_fishing_miniapp_public_flow,

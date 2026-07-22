@@ -296,6 +296,7 @@ async def run_public_production_flow(
             token=launch.get("token"),
             webview_url=launch.get("webview_url"),
             bot_username=launch.get("bot_username"),
+            launch_context=launch,
         )
         return await asyncio.to_thread(
             run_flow,

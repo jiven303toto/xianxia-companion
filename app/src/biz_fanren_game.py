@@ -874,6 +874,72 @@ def get_rift_failure_lock_reason(payload: dict, raw_text: str = "") -> str:
     return ""
 
 
+def _is_escaped_soul_residual_reply(raw_text: str) -> bool:
+    text = str(raw_text or "")
+    return "渴望夺舍重生" in text and any(
+        keyword in text for keyword in ("残魂", "残婴", "元婴")
+    )
+
+
+def _activate_rift_rebirth(
+    storage,
+    db,
+    session,
+    event,
+    sender,
+    raw_text,
+    rift_failure_reason,
+    *,
+    detection_source,
+    payload_status="",
+):
+    rift_profile_id = int(session.get("profile_id") or 0)
+    rebirth_state = {}
+    if storage and rift_profile_id:
+        rebirth_state = profile_rebirth.start_profile_rebirth(
+            storage,
+            profile_id=rift_profile_id,
+            chat_id=int(event.chat_id),
+            thread_id=(int(session["thread_id"]) if session.get("thread_id") else None),
+            chat_type=str(session.get("chat_type") or "group"),
+            bot_username=str(session.get("bot_username") or FANREN_BOT_USERNAME),
+        )
+    update_session(
+        db,
+        event.chat_id,
+        profile_id=session.get("profile_id"),
+        stopped_reason="",
+        rift_state=rift_failure_reason,
+        rift_next_check_time=0,
+        rift_retry_count=0,
+        last_event="rift_escaped_soul",
+        last_summary=rift_failure_reason,
+        last_bot_text=raw_text[:1000],
+        last_bot_msg_id=int(getattr(event, "id", 0) or 0),
+    )
+    append_rift_execution_log(
+        storage,
+        profile_id=session.get("profile_id"),
+        chat_id=event.chat_id,
+        thread_id=session.get("thread_id"),
+        step="rebirth",
+        event_type="escaped_soul_rebirth_started",
+        rift_state=rift_failure_reason,
+        retry_count=int(session.get("rift_retry_count") or 0),
+        message_id=int(getattr(event, "id", 0) or 0),
+        reply_to_msg_id=_event_reply_to_msg_id(event),
+        sender_id=int(getattr(event, "sender_id", 0) or 0),
+        sender_username=str(getattr(sender, "username", "") or ""),
+        text=raw_text,
+        detail={
+            "payload_status": str(payload_status or ""),
+            "detection_source": str(detection_source or ""),
+            "rebirth_state": rebirth_state,
+        },
+    )
+    return FanrenParseResult("rift_escaped_soul", rift_failure_reason)
+
+
 def _parse_iso_to_ts(raw_value) -> float:
     text = str(raw_value or "").strip()
     if not text:
@@ -1907,6 +1973,26 @@ async def _event_reply_message(event):
         return None
 
 
+async def _bot_reply_targets_profile(event, profile, storage=None, profile_id=0) -> bool:
+    reply_to_msg_id = _event_reply_to_msg_id(event)
+    if storage is not None and profile_id and reply_to_msg_id > 0:
+        parent = storage.get_bound_message(
+            int(getattr(event, "chat_id", 0) or 0),
+            reply_to_msg_id,
+            int(profile_id),
+        )
+        if (
+            parent
+            and str(parent.get("direction") or "") == "outgoing"
+            and not int(parent.get("is_bot") or 0)
+        ):
+            return True
+    reply_message = await _event_reply_message(event)
+    expected_user_id = str(getattr(profile, "telegram_user_id", "") or "").strip()
+    sender_id = str(getattr(reply_message, "sender_id", "") or "").strip()
+    return bool(expected_user_id and sender_id == expected_user_id)
+
+
 async def _resolve_rebirth_reply_command(event, storage, profile_id) -> str:
     reply_to_msg_id = _event_reply_to_msg_id(event)
     if storage is not None and profile_id and reply_to_msg_id > 0:
@@ -2127,6 +2213,48 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
     is_edit = (
         session.get("last_bot_msg_id") == event.id and raw_text[:1000] != last_bot_text
     )
+    current_profile_id = int(session.get("profile_id") or profile_id or 0)
+    explicit_rift_failure_reason = get_rift_failure_lock_reason({}, raw_text)
+    residual_reply = _is_escaped_soul_residual_reply(raw_text)
+    targets_current_profile = False
+    if explicit_rift_failure_reason or residual_reply:
+        targets_current_profile = await _bot_reply_targets_profile(
+            event,
+            profile,
+            storage=storage,
+            profile_id=current_profile_id,
+        )
+    if (
+        storage is not None
+        and session.get("auto_rift_enabled")
+        and targets_current_profile
+        and explicit_rift_failure_reason
+    ):
+        return _activate_rift_rebirth(
+            storage,
+            db,
+            session,
+            event,
+            sender,
+            raw_text,
+            explicit_rift_failure_reason,
+            detection_source="edited_bot_text" if is_edit else "bot_text",
+        )
+    if (
+        storage is not None
+        and targets_current_profile
+        and residual_reply
+    ):
+        return _activate_rift_rebirth(
+            storage,
+            db,
+            session,
+            event,
+            sender,
+            raw_text,
+            "元婴遁逃·虚弱（残魂状态），普通调度已冻结并进入自动夺舍重生",
+            detection_source="residual_command_reply",
+        )
     if is_edit:
         last_event = session.get("last_event") or ""
         update_session(
@@ -2348,55 +2476,16 @@ async def handle_bot_message(event, db, client=None, profile_id=None):
         )
         rift_failure_reason = get_rift_failure_lock_reason(payload, raw_text)
         if rift_failure_reason:
-            rebirth_state = {}
-            if storage and rift_profile_id:
-                rebirth_state = profile_rebirth.start_profile_rebirth(
-                    storage,
-                    profile_id=rift_profile_id,
-                    chat_id=int(event.chat_id),
-                    thread_id=(
-                        int(session["thread_id"]) if session.get("thread_id") else None
-                    ),
-                    chat_type=str(session.get("chat_type") or "group"),
-                    bot_username=str(
-                        session.get("bot_username") or FANREN_BOT_USERNAME
-                    ),
-                )
-            update_session(
-                db,
-                event.chat_id,
-                profile_id=session.get("profile_id"),
-                stopped_reason="",
-                rift_state=rift_failure_reason,
-                rift_next_check_time=0,
-                rift_retry_count=0,
-                last_event="rift_escaped_soul",
-                last_summary=rift_failure_reason,
-                last_bot_text=raw_text[:1000],
-                last_bot_msg_id=int(getattr(event, "id", 0) or 0),
-            )
-            append_rift_execution_log(
+            return _activate_rift_rebirth(
                 storage,
-                profile_id=session.get("profile_id"),
-                chat_id=event.chat_id,
-                thread_id=session.get("thread_id"),
-                step="rebirth",
-                event_type="escaped_soul_rebirth_started",
-                rift_state=rift_failure_reason,
-                retry_count=int(session.get("rift_retry_count") or 0),
-                message_id=int(getattr(event, "id", 0) or 0),
-                reply_to_msg_id=incoming_reply_to_msg_id,
-                sender_id=int(getattr(event, "sender_id", 0) or 0),
-                sender_username=str(getattr(sender, "username", "") or ""),
-                text=raw_text,
-                detail={
-                    "payload_status": str(payload.get("status") or ""),
-                    "rebirth_state": rebirth_state,
-                },
-            )
-            return FanrenParseResult(
-                "rift_escaped_soul",
+                db,
+                session,
+                event,
+                sender,
+                raw_text,
                 rift_failure_reason,
+                detection_source="asc_status",
+                payload_status=str(payload.get("status") or ""),
             )
 
         if not (refresh_result or {}).get("ok"):

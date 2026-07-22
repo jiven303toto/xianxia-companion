@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact-hero">
+    <p class="eyebrow">诸法争锋</p>
+    <h1>诸元神争锋</h1>
+    <p class="hero-text">由管理员选择本次出战元神，并统一挑战指定 Telegram 账号。未勾选的 Profile 不会进入争锋批次。</p>
+</section>
+
+<section class="admin-execution-grid">
+    <article class="detail-card admin-execution-card">
+        <div class="section-header compact admin-execution-header">
+            <div>
+                <p>每日争锋计划</p>
+                <h2>自定义争锋计划</h2>
+            </div>
+            <span class="admin-execution-status is-{{ battle_schedule.batch.status }}">{{ battle_schedule.batch.status_label }}</span>
+        </div>
+
+        {% if battle_schedule_error %}
+        <p class="global-result-message is-error">{{ battle_schedule_error }}</p>
+        {% endif %}
+
+        <form class="admin-execution-schedule battle-schedule-config-form" method="post" action="/admin/battle-schedule/config">
+            <label class="admin-execution-schedule-toggle">
+                <input type="checkbox" name="enabled" value="1" role="switch" aria-label="每日自动争锋" {% if battle_schedule.config.enabled %}checked{% endif %}>
+                <span>每日自动争锋</span>
+            </label>
+            <label class="admin-execution-schedule-time">
+                <span>目标账号</span>
+                <input type="text" name="target_username" value="{{ battle_schedule.config.target_username }}" placeholder="@TelegramUsername">
+            </label>
+            <label class="admin-execution-schedule-time">
+                <span>开始时间</span>
+                <input type="time" name="run_time" value="{{ battle_schedule.config.run_time }}" required>
+            </label>
+            <label class="admin-execution-schedule-time">
+                <span>每个 Profile 次数</span>
+                <input type="number" name="daily_attempts" min="1" max="10" value="{{ battle_schedule.config.daily_attempts }}" required>
+            </label>
+            <button type="submit" class="inline-button">保存计划</button>
+            <fieldset class="battle-profile-selector">
+                <legend>选择出战元神</legend>
+                <p class="muted">只会调度已勾选的 Profile。请根据境界与修为手工排除不适合斗法的账号。</p>
+                <div class="battle-profile-options">
+                    {% for option in battle_schedule.profile_options %}
+                    <label class="battle-profile-option{% if option.selected %} is-selected{% endif %}{% if not option.available %} is-disabled{% endif %}">
+                        <input class="form-check-input" type="checkbox" name="selected_profile_ids" value="{{ option.id }}" {% if option.selected %}checked{% endif %} {% if not option.available %}disabled{% endif %}>
+                        <span class="form-check-box" aria-hidden="true"></span>
+                        <span class="battle-profile-content">
+                            <strong>{{ option.profile_label }} · {{ option.profile_name }}</strong>
+                            <small>{{ option.account_name }}</small>
+                            <small>{{ option.stage_name }} · {{ option.cultivation_text }}</small>
+                            {% if option.unavailable_reason %}<small class="is-error">不可出战：{{ option.unavailable_reason }}</small>{% endif %}
+                        </span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </fieldset>
+        </form>
+
+        <p class="muted top-gap">已选 Profile 按目标 5 分钟、战败方至少 15 分钟冷却串行执行；目标账号不能同时属于出战 Profile。</p>
+
+        <div class="admin-execution-schedule-meta">
+            <div><span>上次自动执行</span><strong>{{ battle_schedule.config.last_run_display }}</strong></div>
+            <div><span>下次自动执行</span><strong>{{ battle_schedule.config.next_run_display }}</strong></div>
+        </div>
+
+        <div class="admin-execution-summary">
+            <div><span>当前目标</span><strong>{{ battle_schedule.batch.target_username or battle_schedule.config.target_username or '未配置' }}</strong></div>
+            <div><span>开始时间</span><strong>{{ battle_schedule.batch.started_at_display }}</strong></div>
+            <div><span>目标可再次斗法</span><strong>{{ battle_schedule.batch.target_ready_display }}</strong></div>
+            <div><span>累计转移修为</span><strong>{{ battle_schedule.total_transferred }}</strong></div>
+        </div>
+
+        <div class="battle-schedule-actions top-gap">
+            <form method="post" action="/admin/battle-schedule/start">
+                <button type="submit" class="button" {% if not battle_schedule.can_start %}disabled{% endif %}>敕令诸元神·开始争锋</button>
+            </form>
+            <form method="post" action="/admin/battle-schedule/stop">
+                <button type="submit" class="inline-button" {% if not battle_schedule.active %}disabled{% endif %}>停止当前争锋</button>
+            </form>
+        </div>
+    </article>
+
+    <article class="detail-card admin-execution-card">
+        <div class="section-header compact">
+            <div>
+                <p>执行状态</p>
+                <h2>元神争锋录</h2>
+            </div>
+        </div>
+        {% if battle_schedule.batch['items'] %}
+        <div class="admin-execution-report-table battle-schedule-report-table">
+            <div class="admin-execution-report-row is-header">
+                <span>元神</span><span>状态</span><span>结果</span>
+            </div>
+            {% for item in battle_schedule.batch['items'] %}
+            <div class="admin-execution-report-row">
+                <strong>{{ item.profile_name }}<br><small>{{ item.account_name }}</small></strong>
+                <span class="battle-schedule-status-cell">
+                    <span class="admin-execution-result is-{{ item.status }}">{{ item.status_label }}</span>
+                    <small>{{ item.progress }}</small>
+                </span>
+                <span class="battle-result-cell">
+                    <span class="battle-result-heading is-{{ item.result_view.tone }}">{{ item.result_view.label }}</span>
+                    <strong>{{ item.result_view.summary }}</strong>
+                    {% if item.result_view.details %}
+                    <span class="battle-result-meta">
+                        {% for detail in item.result_view.details %}
+                        <small><em>{{ detail.label }}</em>{{ detail.value }}</small>
+                        {% endfor %}
+                    </span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted top-gap">尚未开始争锋任务。</p>
+        {% endif %}
+    </article>
+
+    <article class="detail-card admin-execution-card">
+        <div class="section-header compact">
+            <div>
+                <p>最近记录</p>
+                <h2>天道战报摘要</h2>
+            </div>
+        </div>
+        {% if battle_schedule.batch.events %}
+        <div class="admin-execution-report-table battle-schedule-event-table">
+            <div class="admin-execution-report-row is-header">
+                <span>时间</span><span>元神</span><span>事件</span><span>详情</span>
+            </div>
+            {% for event in battle_schedule.batch.events %}
+            <div class="admin-execution-report-row">
+                <strong>{{ event.at_display }}</strong>
+                <span>{{ event.profile_name }}</span>
+                <span><span class="battle-result-heading is-{{ event.result_tone }}">{{ event.result_label }}</span></span>
+                <span>{{ event.detail }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="muted top-gap">暂无争锋记录。</p>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

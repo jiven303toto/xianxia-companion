@@ -1,5 +1,5 @@
 MINIAPP_SAFETY_BOUNDARY = (
-    "只读同步会临时请求 Telegram WebView 和 xianxia-dwelling/start；"
+    "只读同步会临时请求 Telegram WebView、xianxia-dwelling/start、details 和 external；"
     "未执行升级/寻宝/布置/宝阁等消耗动作；不保存 initData/tgWebAppData/hash/user/raw URL。"
 )
 MINIAPP_HUNT_SAFETY_BOUNDARY = (
@@ -11,6 +11,7 @@ ESTATE_MINIAPP_DEFAULT_BOT_USERNAME = "fanrenxiuxian_bot"
 ESTATE_MINIAPP_FALLBACK_START_PARAM_ENV = (
     "TG_GAME_ESTATE_MINIAPP_FALLBACK_START_PARAM"
 )
+ESTATE_MINIAPP_FALLBACK_URL_ENV = "TG_GAME_ESTATE_MINIAPP_FALLBACK_URL"
 ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL = -1002083016447
 ESTATE_MINIAPP_PUBLIC_ENTRY_STATE_KEY = "estate_public_entry_discovery"
 ESTATE_MINIAPP_DEFAULT_API_BASE_URL = "https://asc.aiopenai.app"
@@ -18,6 +19,8 @@ ESTATE_MINIAPP_WEB_PATH = "/miniapp/xianxia-dwelling"
 ESTATE_MINIAPP_API_PATH_PREFIX = "/api/miniapp/xianxia-dwelling/"
 ESTATE_MINIAPP_ENDPOINTS = {
     "start": f"{ESTATE_MINIAPP_API_PATH_PREFIX}start",
+    "details": f"{ESTATE_MINIAPP_API_PATH_PREFIX}details",
+    "external": f"{ESTATE_MINIAPP_API_PATH_PREFIX}external",
     "journey": f"{ESTATE_MINIAPP_API_PATH_PREFIX}journey",
     "hunt": f"{ESTATE_MINIAPP_API_PATH_PREFIX}hunt",
     "hunt_reveal": f"{ESTATE_MINIAPP_API_PATH_PREFIX}hunt/reveal",

@@ -1,9 +1,10 @@
+import json
 import time
 from copy import deepcopy
 from typing import Optional
 
 
-PAGODA_REQUEST_LEASE_SECONDS = 30 * 60
+PAGODA_REQUEST_LEASE_SECONDS = 5 * 60
 PAGODA_INTERRUPTED_ERROR = "闯塔执行进程已中断，未自动重试；请重新发起。"
 ACTIVE_REQUEST_STATUSES = {"queued", "resolving", "running"}
 
@@ -29,6 +30,18 @@ def _float(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _dict(value: object) -> dict:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _pagoda_root(payload: object) -> dict:
@@ -171,7 +184,12 @@ def mark_pagoda_request_running(
     if str(request.get("execution_owner") or "") != str(execution_owner or ""):
         return updated
     current = float(time.time() if now is None else now)
-    current_phase = "challenge" if str(phase or "") == "challenge" else "start"
+    requested_phase = str(phase or "")
+    current_phase = (
+        requested_phase
+        if requested_phase in {"challenge", "settlement_confirm"}
+        else "start"
+    )
     request["status"] = "running"
     request["phase"] = current_phase
     request["lease_expires_at"] = current + PAGODA_REQUEST_LEASE_SECONDS
@@ -180,11 +198,10 @@ def mark_pagoda_request_running(
         **dict(root.get("run") or {}),
         "status": "running",
         "phase": current_phase,
-        "status_label": (
-            "服务端正在结算闯塔"
-            if current_phase == "challenge"
-            else "正在读取琉璃塔况"
-        ),
+        "status_label": {
+            "challenge": "服务端正在结算闯塔",
+            "settlement_confirm": "等待服务端结算核验",
+        }.get(current_phase, "正在读取琉璃塔况"),
         "updated_at": _now_text(current),
         "error": "",
     }
@@ -259,7 +276,7 @@ def finish_pagoda_request(
     updated["pagoda_miniapp"] = root
 
     if status in {"settled", "skipped"}:
-        progress = dict(updated.get("pagoda_progress") or {})
+        progress = _dict(updated.get("pagoda_progress"))
         progress["highest_floor"] = int(state.get("recordHighest") or progress.get("highest_floor") or 0)
         progress["last_attempt_date"] = _now_text(current)
         progress["is_in_pagoda"] = False

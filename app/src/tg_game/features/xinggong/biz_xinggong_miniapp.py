@@ -35,7 +35,7 @@ XINGGONG_STARBOARD_HISTORY_LIMIT = 24
 XINGGONG_STARBOARD_HISTORY_TZ = timezone(timedelta(hours=8))
 XINGGONG_STARBOARD_SAFETY_BOUNDARY = (
     "自动星辰采集通过公共洞府入口获取星宫 MiniApp，临时请求 Telegram WebView，"
-    "随后只调用 xianxia-dwelling/start、xianxia-sect-farm/start 与 action；"
+    "随后只调用洞府 start/details/external，以及 xianxia-sect-farm/start 与 action；"
     "不保存 initData/tgWebAppData/hash/user/raw URL。"
 )
 
@@ -1402,6 +1402,7 @@ async def run_xinggong_starboard_public_miniapp_production_flow(
     transport=None,
     target_star: str = XINGGONG_STARBOARD_DEFAULT_STAR,
     snapshot_only: bool = False,
+    sleeper=time.sleep,
 ) -> dict:
     target = normalize_starboard_target(target_star)
     try:
@@ -1428,17 +1429,22 @@ async def run_xinggong_starboard_public_miniapp_production_flow(
             token=estate_launch.get("token"),
             webview_url=estate_launch.get("webview_url"),
             bot_username=estate_launch.get("bot_username"),
+            launch_context=estate_launch,
         )
         request = estate_miniapp.build_estate_miniapp_request(
             "start",
             token=estate_launch.get("token"),
             init_data=init_data,
         )
-        start_result = await asyncio.to_thread(
-            estate_miniapp.execute_estate_miniapp_request,
+        lookup = await asyncio.to_thread(
+            estate_miniapp.execute_estate_external_app_lookup,
             request,
             transport or estate_miniapp._urllib_transport,
+            extract_public_xinggong_starboard_launch,
+            action="sect_farm",
+            sleeper=sleeper,
         )
+        start_result = lookup.get("result") or {}
         if not start_result.get("ok"):
             return _flow_result(
                 False,
@@ -1446,15 +1452,16 @@ async def run_xinggong_starboard_public_miniapp_production_flow(
                 target_star=target,
                 error=start_result.get("error"),
             )
-        starboard_launch = extract_public_xinggong_starboard_launch(
-            start_result.get("data") or {}
-        )
+        starboard_launch = lookup.get("launch") or {}
         if not starboard_launch:
             return _flow_result(
                 False,
                 "failed",
                 target_star=target,
-                error="洞府公共入口未返回星宫观星台链接",
+                error=(
+                    f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                    "未返回星宫观星台链接"
+                ),
             )
         flow = (
             run_xinggong_starboard_snapshot_flow

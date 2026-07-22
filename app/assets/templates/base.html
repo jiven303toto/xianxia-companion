@@ -35,7 +35,7 @@
         }
     })();
     </script>
-    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260719-web-performance-p1-v1">
+    <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}?v=20260720-battle-log-v1">
 </head>
 <body>
 {% set current_path = request.url.path %}
@@ -101,6 +101,7 @@
             <a class="{% if current_path == '/modules/dungeon' %}active{% endif %}" href="/modules/dungeon">秘境降魔</a>
             {% if is_admin_profile %}
             <a class="{% if current_path == '/admin/global-execution' %}active{% endif %}" href="/admin/global-execution">诸元神巡令</a>
+            <a class="{% if current_path == '/admin/battle-schedule' %}active{% endif %}" href="/admin/battle-schedule">诸元神争锋</a>
             {% endif %}
         </nav>
         {% if active_profile %}

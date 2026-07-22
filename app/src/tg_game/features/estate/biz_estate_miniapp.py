@@ -17,6 +17,7 @@ from .biz_estate_constants import (
     ESTATE_MINIAPP_DEFAULT_BOT_USERNAME,
     ESTATE_MINIAPP_ENDPOINTS,
     ESTATE_MINIAPP_FALLBACK_START_PARAM_ENV,
+    ESTATE_MINIAPP_FALLBACK_URL_ENV,
     ESTATE_MINIAPP_PUBLIC_ENTRY_CHANNEL,
     ESTATE_MINIAPP_PUBLIC_ENTRY_STATE_KEY,
     ESTATE_MINIAPP_WEB_PATH,
@@ -78,6 +79,8 @@ _SENSITIVE_KEY_LABELS = {
 }
 _ESTATE_PUBLIC_ENTRY_DISCOVERY_LOCK = asyncio.Lock()
 _ESTATE_PUBLIC_ENTRY_SCAN_LIMIT = 200
+_ESTATE_PUBLIC_ENTRY_SEARCH_TERMS = ("洞府公共入口", "洞府")
+ESTATE_EXTERNAL_APP_RETRY_DELAYS = (2.0, 5.0, 10.0)
 
 
 def _flatten_buttons(value: object):
@@ -409,6 +412,26 @@ def _extract_public_estate_launch(message: object) -> dict:
 
 
 def _configured_estate_public_miniapp_launch() -> dict:
+    fallback_url = os.getenv(ESTATE_MINIAPP_FALLBACK_URL_ENV, "").strip()
+    if fallback_url:
+        token = _start_param_from_url(fallback_url)
+        bot_username = _bot_username_from_url(fallback_url)
+        entry = _summarize_url("进入洞府", fallback_url) or {}
+        if (
+            str(entry.get("host") or "").lower() not in {"t.me", "telegram.me"}
+            or str(entry.get("start_param_key") or "").lower() != "startapp"
+            or str(entry.get("start_param_kind") or "").lower() != "df"
+            or not bot_username
+            or not token.lower().startswith("df_")
+            or not _ESTATE_TOKEN_PATTERN.fullmatch(token)
+        ):
+            raise ValueError("配置的洞府 fallback URL 无效")
+        return {
+            "token": token,
+            "webview_url": fallback_url,
+            "bot_username": bot_username,
+            "entry": entry,
+        }
     token = os.getenv(ESTATE_MINIAPP_FALLBACK_START_PARAM_ENV, "").strip()
     if not token:
         return {}
@@ -516,16 +539,19 @@ async def discover_estate_public_miniapp_launch(
                 discovered_launch = candidate
                 discovered_message_id = message_id
         if not discovered_launch:
-            async for message in client.iter_messages(
-                channel,
-                limit=20,
-                search="洞府",
-            ):
-                message_id = _message_id(message)
-                candidate = _extract_public_estate_launch(message)
-                if candidate and message_id > discovered_message_id:
-                    discovered_launch = candidate
-                    discovered_message_id = message_id
+            for search_term in _ESTATE_PUBLIC_ENTRY_SEARCH_TERMS:
+                async for message in client.iter_messages(
+                    channel,
+                    limit=20,
+                    search=search_term,
+                ):
+                    message_id = _message_id(message)
+                    candidate = _extract_public_estate_launch(message)
+                    if candidate and message_id > discovered_message_id:
+                        discovered_launch = candidate
+                        discovered_message_id = message_id
+                if discovered_launch:
+                    break
     discovery_state["channel"] = source_channel
     discovery_state["last_scanned_message_id"] = latest_message_id
     if current_launch:
@@ -823,6 +849,93 @@ def execute_estate_miniapp_request(request: dict, transport) -> dict:
             "data": {},
             "error": sanitize_estate_miniapp_secret_text(exc),
         }
+
+
+def execute_estate_external_app_lookup(
+    request: dict,
+    transport,
+    extractor,
+    *,
+    action: str = "",
+    sleeper=time.sleep,
+    retry_delays=None,
+) -> dict:
+    delays = (
+        ESTATE_EXTERNAL_APP_RETRY_DELAYS
+        if retry_delays is None
+        else tuple(retry_delays)
+    )
+    attempts = 0
+    result = {}
+    launch = {}
+    for delay_after in (None, *delays):
+        if delay_after is not None:
+            sleeper(float(delay_after))
+        attempts += 1
+        result = execute_estate_miniapp_request(request, transport)
+        if not result.get("ok"):
+            break
+        data = result.get("data") or {}
+        launch = extractor(data) or {}
+        if launch:
+            break
+        clean_action = str(action or "").strip()
+        if not clean_action:
+            continue
+        payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+        account = data.get("account") if isinstance(data.get("account"), dict) else {}
+        details_request = build_estate_miniapp_request(
+            "details",
+            token=payload.get("token"),
+            init_data=payload.get("initData"),
+            payload={"playerId": str(account.get("playerId") or "")},
+            api_base_url=request.get("url") or ESTATE_MINIAPP_DEFAULT_API_BASE_URL,
+        )
+        result = execute_estate_miniapp_request(details_request, transport)
+        if not result.get("ok"):
+            break
+        data = result.get("data") or {}
+        launch = extractor(data) or {}
+        if launch:
+            break
+        account = data.get("account") if isinstance(data.get("account"), dict) else {}
+        external_apps = account.get("externalApps") if isinstance(account.get("externalApps"), dict) else {}
+        groups = external_apps.get("groups") if isinstance(external_apps.get("groups"), list) else []
+        target_app = next(
+            (
+                app
+                for group in groups
+                if isinstance(group, dict)
+                for app in (group.get("apps") if isinstance(group.get("apps"), list) else [])
+                if isinstance(app, dict)
+                and bool(app.get("available", True))
+                and str(app.get("action") or app.get("key") or "").strip() == clean_action
+            ),
+            None,
+        )
+        if target_app is None:
+            continue
+        external_request = build_estate_miniapp_request(
+            "external",
+            token=payload.get("token"),
+            init_data=payload.get("initData"),
+            payload={"action": clean_action},
+            api_base_url=request.get("url") or ESTATE_MINIAPP_DEFAULT_API_BASE_URL,
+        )
+        result = execute_estate_miniapp_request(external_request, transport)
+        if not result.get("ok"):
+            break
+        resolved_url = str((result.get("data") or {}).get("url") or "").strip()
+        if resolved_url:
+            target_app["url"] = resolved_url
+            launch = extractor(data) or {}
+        if launch:
+            break
+    return {
+        "result": result,
+        "launch": launch,
+        "attempts": attempts,
+    }
 
 
 def _execute_hunt_reveal_with_retry(request: dict, transport) -> dict:
@@ -1189,7 +1302,7 @@ def _extract_init_data_from_webview_url(url: str) -> str:
     return ""
 
 
-async def request_estate_miniapp_init_data(
+async def _request_estate_miniapp_init_data_once(
     client: object,
     *,
     token: str,
@@ -1234,6 +1347,50 @@ async def request_estate_miniapp_init_data(
     return init_data
 
 
+async def request_estate_miniapp_init_data(
+    client: object,
+    *,
+    token: str,
+    webview_url: str = "",
+    bot_username: str = "",
+    launch_context: Optional[dict] = None,
+) -> str:
+    try:
+        return await _request_estate_miniapp_init_data_once(
+            client,
+            token=token,
+            webview_url=webview_url,
+            bot_username=bot_username,
+        )
+    except Exception as primary_exc:
+        if not isinstance(launch_context, dict):
+            raise
+        fallback_launch = _configured_estate_public_miniapp_launch()
+        if not fallback_launch or (
+            str(fallback_launch.get("token") or "") == str(token or "")
+            and str(fallback_launch.get("bot_username") or "")
+            == str(bot_username or _bot_username_from_url(webview_url) or "")
+        ):
+            raise
+        try:
+            init_data = await _request_estate_miniapp_init_data_once(
+                client,
+                token=fallback_launch.get("token"),
+                webview_url=fallback_launch.get("webview_url"),
+                bot_username=fallback_launch.get("bot_username"),
+            )
+        except Exception as fallback_exc:
+            raise RuntimeError(
+                "公共入口 WebView 失败："
+                f"{sanitize_estate_miniapp_secret_text(primary_exc)}；"
+                "备用入口 WebView 失败："
+                f"{sanitize_estate_miniapp_secret_text(fallback_exc)}"
+            ) from fallback_exc
+        launch_context.clear()
+        launch_context.update(fallback_launch)
+        return init_data
+
+
 async def run_estate_miniapp_production_snapshot_flow(
     client: object,
     *,
@@ -1271,6 +1428,7 @@ async def run_estate_miniapp_production_hunt_flow(
     capture_source: str = "",
     max_reveals: int = 8,
     min_ap_to_settle: int = 0,
+    launch_context: Optional[dict] = None,
 ) -> dict:
     try:
         init_data = await request_estate_miniapp_init_data(
@@ -1278,10 +1436,16 @@ async def run_estate_miniapp_production_hunt_flow(
             token=token,
             webview_url=webview_url,
             bot_username=bot_username,
+            launch_context=launch_context,
+        )
+        effective_token = (
+            launch_context.get("token")
+            if isinstance(launch_context, dict)
+            else token
         )
         return await asyncio.to_thread(
             run_estate_miniapp_daily_hunt_flow,
-            token=token,
+            token=effective_token,
             init_data=init_data,
             transport=transport or _urllib_transport,
             capture_source=capture_source,
@@ -1342,6 +1506,7 @@ async def run_estate_public_miniapp_production_hunt_flow(
         capture_source=capture_source,
         max_reveals=max_reveals,
         min_ap_to_settle=min_ap_to_settle,
+        launch_context=launch,
     )
     result = dict(result)
     result["entry"] = launch.get("entry")

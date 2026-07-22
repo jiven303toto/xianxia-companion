@@ -52,6 +52,7 @@ from tg_game.features.companion.biz_companion_voyage import (
 )
 from tg_game.features.beast_merge import biz_beast_merge_daily_auto
 from tg_game.features.beast_merge import biz_beast_merge_state
+from tg_game.features.battle import biz_battle_schedule
 from tg_game.features.pagoda import biz_pagoda_state as pagoda_state
 from tg_game.features.countdowns.biz_countdowns_view_model import (
     build_auto_task_countdown_items as _countdown_build_auto_task_countdown_items,
@@ -174,7 +175,7 @@ from tg_game.features.tianji_trial.biz_tianji_trial_remnant_state import (
     build_tianji_remnant_state as _tianji_build_tianji_remnant_state,
     get_latest_tianji_remnant_reply as _tianji_get_latest_tianji_remnant_reply,
 )
-from tg_game.services import module_registry
+from tg_game.services import module_registry, profile_rebirth
 from tg_game.services.cultivation_sync import sync_cultivation_session
 from tg_game.services.external_sync import (
     ASC_PROVIDER,
@@ -231,7 +232,7 @@ from tg_game.web.biz_web_display_formatting import (
     resolve_scenery_display_name as _resolve_scenery_display_name,
     stringify_payload_stat_value as _stringify_payload_stat_value,
 )
-from tg_game.web import admin_global_execution
+from tg_game.web import admin_battle_schedule, admin_global_execution
 from tg_game.web.biz_artifact_view_model import (
     build_artifact_nurture_auto_view as _artifact_build_artifact_nurture_auto_view,
     build_artifact_nurture_command as _artifact_build_artifact_nurture_command,
@@ -560,6 +561,8 @@ def create_app() -> FastAPI:
     application.state.bot_sync_lock = bot_sync_lock
     admin_global_execution_lock = asyncio.Lock()
     application.state.admin_global_execution_lock = admin_global_execution_lock
+    admin_battle_schedule_lock = asyncio.Lock()
+    application.state.admin_battle_schedule_lock = admin_battle_schedule_lock
     bot_schedule_cache = {"loaded_at": 0.0, "state": None}
     tianxing_marker_cache: dict[int, tuple[float, list[str]]] = {}
     web_started_at = time.time()
@@ -1883,6 +1886,111 @@ def create_app() -> FastAPI:
             },
         )
 
+    @application.get("/admin/battle-schedule", response_class=HTMLResponse)
+    async def admin_battle_schedule_page(request: Request) -> HTMLResponse:
+        active_profile = _get_request_profile(request)
+        if not _is_admin_profile(active_profile):
+            raise HTTPException(
+                status_code=403,
+                detail="Only admin can manage battle schedules",
+            )
+        dashboard = admin_battle_schedule.build_dashboard(storage)
+        return templates.TemplateResponse(
+            request,
+            "admin_battle_schedule.html",
+            {
+                "app_name": settings.app_name,
+                "active_profile": active_profile,
+                "battle_schedule": dashboard,
+                "battle_schedule_error": str(
+                    request.query_params.get("error") or ""
+                ).strip(),
+                **_build_shared_template_context(active_profile),
+            },
+        )
+
+    @application.post("/admin/battle-schedule/config")
+    async def admin_battle_schedule_config(
+        request: Request,
+        enabled: str = Form("0"),
+        target_username: str = Form(""),
+        run_time: str = Form("22:10"),
+        daily_attempts: str = Form("10"),
+    ) -> RedirectResponse:
+        active_profile = _get_request_profile(request)
+        if not _is_admin_profile(active_profile):
+            raise HTTPException(
+                status_code=403,
+                detail="Only admin can manage battle schedules",
+            )
+        form_data = await request.form()
+        async with admin_battle_schedule_lock:
+            try:
+                biz_battle_schedule.set_config(
+                    storage,
+                    storage.list_profiles(),
+                    admin_profile_id=active_profile.id,
+                    enabled=enabled == "1",
+                    target_username=target_username,
+                    run_time=run_time,
+                    daily_attempts=daily_attempts,
+                    selected_profile_ids=form_data.getlist("selected_profile_ids"),
+                )
+            except ValueError as exc:
+                return RedirectResponse(
+                    url=(
+                        "/admin/battle-schedule?error="
+                        f"{quote_plus(str(exc))}"
+                    ),
+                    status_code=303,
+                )
+        return RedirectResponse(url="/admin/battle-schedule", status_code=303)
+
+    @application.post("/admin/battle-schedule/start")
+    async def admin_battle_schedule_start(request: Request) -> RedirectResponse:
+        active_profile = _get_request_profile(request)
+        if not _is_admin_profile(active_profile):
+            raise HTTPException(
+                status_code=403,
+                detail="Only admin can manage battle schedules",
+            )
+        async with admin_battle_schedule_lock:
+            try:
+                biz_battle_schedule.start_batch(
+                    storage,
+                    storage.list_profiles(),
+                    admin_profile_id=active_profile.id,
+                )
+            except biz_battle_schedule.BattleScheduleBusyError as exc:
+                return RedirectResponse(
+                    url=(
+                        "/admin/battle-schedule?error="
+                        f"{quote_plus(str(exc))}"
+                    ),
+                    status_code=303,
+                )
+            except ValueError as exc:
+                return RedirectResponse(
+                    url=(
+                        "/admin/battle-schedule?error="
+                        f"{quote_plus(str(exc))}"
+                    ),
+                    status_code=303,
+                )
+        return RedirectResponse(url="/admin/battle-schedule", status_code=303)
+
+    @application.post("/admin/battle-schedule/stop")
+    async def admin_battle_schedule_stop(request: Request) -> RedirectResponse:
+        active_profile = _get_request_profile(request)
+        if not _is_admin_profile(active_profile):
+            raise HTTPException(
+                status_code=403,
+                detail="Only admin can manage battle schedules",
+            )
+        async with admin_battle_schedule_lock:
+            biz_battle_schedule.stop_batch(storage)
+        return RedirectResponse(url="/admin/battle-schedule", status_code=303)
+
     @application.get("/admin/global-execution/status")
     async def admin_global_execution_status(
         request: Request,
@@ -2178,8 +2286,12 @@ def create_app() -> FastAPI:
         small_world_countdowns = []
         sect_countdowns = []
         tianxing_countdowns = []
+        profile_rebirth_countdowns = []
         companion_voyage_state = _build_companion_voyage_state(None)
         if active_profile:
+            profile_rebirth_countdowns = _build_profile_rebirth_countdown_items(
+                profile_rebirth.load_profile_rebirth_state(storage, active_profile.id)
+            )
             sect_chat = profile_state.get("sect_chat")
             starboard_task = storage.get_companion_auto_task(
                 active_profile.id,
@@ -2243,6 +2355,7 @@ def create_app() -> FastAPI:
         )
         all_countdowns = [
             *cultivation_countdowns,
+            *profile_rebirth_countdowns,
             *companion_voyage_countdowns,
             *auto_task_countdowns,
             *sect_countdowns,
@@ -2264,6 +2377,7 @@ def create_app() -> FastAPI:
                 "active_profile": active_profile,
                 "countdown_items": all_countdowns,
                 "cultivation_countdowns": cultivation_countdowns,
+                "profile_rebirth_countdowns": profile_rebirth_countdowns,
                 "companion_voyage_countdowns": companion_voyage_countdowns,
                 "auto_task_countdowns": auto_task_countdowns,
                 "sect_countdowns": sect_countdowns,

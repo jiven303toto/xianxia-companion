@@ -224,11 +224,11 @@ def parse_rebirth_candidates(text: str) -> list[dict]:
 
 def _root_priority(root: str) -> int:
     normalized = str(root or "").replace(" ", "")
-    if "异灵根" in normalized:
+    if "真灵根" in normalized:
         return 0
     if "天灵根" in normalized:
         return 1
-    if "真灵根" in normalized:
+    if "异灵根" in normalized:
         return 2
     if "五行伪灵根" in normalized or "伪灵根" in normalized:
         return 3

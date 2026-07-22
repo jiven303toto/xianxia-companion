@@ -40,7 +40,7 @@ LUOYUN_SPIRIT_TREE_FLY_PROOF_TARGETS = (30, 45)
 LUOYUN_SPIRIT_TREE_JUMP_PROOF_TARGETS = (120, 126, 132, 138)
 LUOYUN_SPIRIT_TREE_SAFETY_BOUNDARY = (
     "只通过公共洞府入口获取云梦山灵眼赛链接，临时请求 Telegram WebView，"
-    "随后只调用 xianxia-dwelling/start、xianxia-spirit-tree/start、"
+    "随后只调用洞府 start/details/external，以及 xianxia-spirit-tree/start、"
     "run/start 与 run/submit；不发送群命令，不保存 initData、token 或原始 URL。"
 )
 
@@ -451,6 +451,7 @@ def run_luoyun_spirit_tree_flow(
     transport,
     run_mode: str = "daily",
     pending_submission: Optional[dict] = None,
+    sleeper=time.sleep,
 ) -> dict:
     mode = "canary" if str(run_mode or "").strip() == "canary" else "daily"
     max_attempts_per_mode = 1 if mode == "canary" else 3
@@ -460,10 +461,14 @@ def run_luoyun_spirit_tree_flow(
         token=estate_token,
         init_data=init_data,
     )
-    dwelling_result = estate_miniapp.execute_estate_miniapp_request(
+    lookup = estate_miniapp.execute_estate_external_app_lookup(
         dwelling_request,
         transport,
+        extract_public_luoyun_spirit_tree_launch,
+        action="spirit_tree",
+        sleeper=sleeper,
     )
+    dwelling_result = lookup.get("result") or {}
     if not dwelling_result.get("ok"):
         return _flow_result(
             False,
@@ -473,13 +478,16 @@ def run_luoyun_spirit_tree_flow(
             failure_kind="dwelling_start_failed",
             pending_submission=recovery,
         )
-    launch = extract_public_luoyun_spirit_tree_launch(dwelling_result.get("data") or {})
+    launch = lookup.get("launch") or {}
     if not launch:
         return _flow_result(
             False,
             "retry_pending",
             run_mode=mode,
-            error="公共洞府外府未返回云梦山灵眼赛链接。",
+            error=(
+                f"洞府外府目录连续 {int(lookup.get('attempts') or 1)} 次"
+                "未返回云梦山灵眼赛链接。"
+            ),
             failure_kind="entry_missing",
             pending_submission=recovery,
         )
@@ -704,6 +712,7 @@ async def run_luoyun_spirit_tree_public_production_flow(
     transport=None,
     run_mode: str = "daily",
     pending_submission: Optional[dict] = None,
+    sleeper=time.sleep,
 ) -> dict:
     try:
         discovery = await estate_miniapp.resolve_estate_public_miniapp_launch(
@@ -718,6 +727,7 @@ async def run_luoyun_spirit_tree_public_production_flow(
             token=launch.get("token"),
             webview_url=launch.get("webview_url"),
             bot_username=launch.get("bot_username"),
+            launch_context=launch,
         )
         return await asyncio.to_thread(
             run_luoyun_spirit_tree_flow,
@@ -726,6 +736,7 @@ async def run_luoyun_spirit_tree_public_production_flow(
             transport=transport or _urllib_transport,
             run_mode=run_mode,
             pending_submission=pending_submission,
+            sleeper=sleeper,
         )
     except Exception as exc:
         return _flow_result(

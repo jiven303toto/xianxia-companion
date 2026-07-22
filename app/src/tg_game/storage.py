@@ -112,7 +112,23 @@ def _merge_local_external_payload_fields(existing_json: object, me_payload: dict
                     merged_xinggong[key] = existing_xinggong[key]
             payload["xinggong_starboard"] = merged_xinggong
     if isinstance(existing_pagoda, dict):
-        if not isinstance(payload_pagoda, dict) or not payload_pagoda:
+        existing_request = (
+            existing_pagoda.get("request")
+            if isinstance(existing_pagoda.get("request"), dict)
+            else {}
+        )
+        request_status = str(existing_request.get("status") or "")
+        lease_expires_at = float(existing_request.get("lease_expires_at") or 0)
+        queued_at = float(existing_request.get("queued_at") or 0)
+        request_is_active = (
+            request_status == "queued"
+            and time.strftime("%Y-%m-%d", time.localtime(queued_at))
+            == time.strftime("%Y-%m-%d", time.localtime())
+        ) or (
+            request_status in {"resolving", "running"}
+            and lease_expires_at > time.time()
+        )
+        if request_is_active or not isinstance(payload_pagoda, dict) or not payload_pagoda:
             payload["pagoda_miniapp"] = existing_pagoda
     if isinstance(existing_luoyun, dict) and not isinstance(payload_luoyun, dict):
         payload["luoyun_spirit_tree"] = existing_luoyun

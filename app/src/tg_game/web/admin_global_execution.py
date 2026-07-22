@@ -26,7 +26,6 @@ STATE_KEY = "admin_global_execution"
 DEFAULT_BOT_USERNAME = "fanrenxiuxian_bot"
 PAGODA_COMMAND = pagoda_auto.COMMAND
 BATCH_TIMEOUT_SECONDS = 15 * 60
-PAGODA_BATCH_TIMEOUT_SECONDS = 30 * 60
 BEAST_MERGE_BATCH_TIMEOUT_SECONDS = 30 * 60
 WILD_EXPERIENCE_BATCH_TIMEOUT_SECONDS = 30 * 60
 TERMINAL_STATUSES = {"success", "failed", "skipped"}
@@ -867,14 +866,15 @@ def refresh_state(storage: Storage) -> dict:
     now = time.time()
     timeout_seconds = {
         "beast_merge": BEAST_MERGE_BATCH_TIMEOUT_SECONDS,
-        "pagoda": PAGODA_BATCH_TIMEOUT_SECONDS,
         "wild_experience": WILD_EXPERIENCE_BATCH_TIMEOUT_SECONDS,
     }.get(active_kind, BATCH_TIMEOUT_SECONDS)
-    timed_out = now - float(batch.get("started_at") or 0) >= timeout_seconds
+    batch_timed_out = active_kind != "pagoda" and (
+        now - float(batch.get("started_at") or 0) >= timeout_seconds
+    )
     for item in batch.get("items") or []:
         if item.get("status") in TERMINAL_STATUSES:
             continue
-        if timed_out:
+        if batch_timed_out:
             item["status"] = "failed"
             continue
         if active_kind == "estate":
@@ -892,9 +892,9 @@ def refresh_state(storage: Storage) -> dict:
         else:
             _refresh_beast_merge_item(storage, item)
 
-    if active_kind == "pagoda" and not timed_out:
+    if active_kind == "pagoda":
         _dispatch_next_pagoda_item(storage, batch.get("items") or [])
-    elif active_kind == "wild_experience" and not timed_out:
+    elif active_kind == "wild_experience" and not batch_timed_out:
         _dispatch_next_wild_experience_item(
             storage,
             batch.get("items") or [],
@@ -1001,6 +1001,8 @@ def _card_view(kind: str, batch: dict | None, schedule: dict) -> dict:
             status_label = "读取塔况（start）"
         elif kind == "pagoda" and status == "running" and phase == "challenge":
             status_label = "服务端结算（challenge）"
+        elif kind == "pagoda" and status == "running" and phase == "settlement_confirm":
+            status_label = "等待服务端结算核验"
         elif kind == "wild_experience" and phase == "retry_wait":
             status_label = "等待补跑"
         items.append(

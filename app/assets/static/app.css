@@ -2747,10 +2747,248 @@ body.is-global-loading {
     background: var(--bg-surface-elevated);
 }
 
+.battle-schedule-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.battle-schedule-config-form {
+    grid-template-columns: auto minmax(260px, 1fr) minmax(140px, 180px) minmax(150px, 180px) auto;
+}
+
+.battle-schedule-config-form > button {
+    align-self: end;
+    white-space: nowrap;
+}
+
+.battle-profile-selector {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.battle-profile-selector legend {
+    padding: 0 6px;
+    color: var(--accent-jade);
+}
+
+.battle-profile-selector p {
+    margin: 0;
+}
+
+.battle-profile-options {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.battle-profile-option {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    cursor: pointer;
+}
+
+.battle-profile-option:has(input:checked) {
+    border-color: var(--accent-jade);
+    background: color-mix(in srgb, var(--accent-jade) 9%, var(--bg-surface));
+}
+
+.battle-profile-option.is-disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+}
+
+.form-check-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.form-check-box {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+    border: 1px solid color-mix(in srgb, var(--accent-jade) 55%, var(--border-color));
+    border-radius: 3px;
+    background: var(--bg-surface-elevated);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, black 10%, transparent);
+}
+
+.form-check-input:checked + .form-check-box {
+    border-color: var(--accent-jade);
+    background: var(--accent-jade);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent-jade) 30%, transparent);
+}
+
+.form-check-input:checked + .form-check-box::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 5px;
+    height: 9px;
+    border: solid var(--bg-base);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.form-check-input:focus-visible + .form-check-box {
+    outline: 2px solid color-mix(in srgb, var(--accent-jade) 70%, transparent);
+    outline-offset: 2px;
+}
+
+.form-check-input:disabled + .form-check-box {
+    opacity: 0.55;
+}
+
+.battle-profile-content {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.battle-profile-option small {
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+
+.battle-profile-option small.is-error {
+    color: var(--error);
+}
+
+@media (max-width: 1200px) {
+    .battle-schedule-config-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .battle-profile-selector {
+        grid-column: 1 / -1;
+    }
+
+    .battle-profile-options {
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    }
+}
+
+.battle-schedule-actions form {
+    margin: 0;
+}
+
+.battle-schedule-actions button {
+    min-width: 180px;
+}
+
+.battle-schedule-report-table .admin-execution-report-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(240px, 1fr) minmax(280px, 2fr);
+}
+
+.battle-result-cell {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.battle-result-cell > strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.battle-result-heading {
+    width: fit-content;
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.battle-result-heading.is-lost,
+.battle-result-heading.is-failed,
+.battle-result-heading.is-unexpected_win,
+.battle-result-heading.is-timeout {
+    border-color: color-mix(in srgb, var(--error) 45%, var(--border-color));
+    color: var(--error);
+}
+
+.battle-result-heading.is-escape,
+.battle-result-heading.is-completed {
+    border-color: color-mix(in srgb, var(--success) 45%, var(--border-color));
+    color: var(--success);
+}
+
+.battle-result-heading.is-queued,
+.battle-result-heading.is-waiting {
+    border-color: color-mix(in srgb, var(--warning) 45%, var(--border-color));
+    color: var(--warning);
+}
+
+.battle-result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.battle-result-meta small {
+    display: inline-flex;
+    gap: 5px;
+    color: var(--text-muted);
+}
+
+.battle-result-meta em {
+    color: var(--text-secondary);
+    font-style: normal;
+}
+
+.battle-schedule-event-table .admin-execution-report-row {
+    grid-template-columns: minmax(150px, 190px) minmax(150px, 1fr) minmax(100px, 130px) minmax(260px, 2fr);
+}
+
+.battle-schedule-status-cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.battle-schedule-status-cell small {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
 @media (max-width: 760px) {
     .admin-execution-schedule {
         grid-template-columns: 1fr;
         align-items: stretch;
+    }
+
+    .battle-schedule-config-form {
+        grid-template-columns: 1fr;
+    }
+
+    .battle-schedule-config-form > *,
+    .battle-profile-selector {
+        grid-column: 1;
+    }
+
+    .battle-profile-options {
+        grid-template-columns: 1fr;
     }
 
     .admin-execution-schedule-meta {
@@ -2767,6 +3005,27 @@ body.is-global-loading {
 
     .admin-execution-report-row > :last-child {
         grid-column: 1 / -1;
+    }
+
+    .battle-schedule-report-table .admin-execution-report-row {
+        grid-template-columns: 1fr;
+    }
+
+    .battle-schedule-event-table .admin-execution-report-row {
+        grid-template-columns: 1fr;
+    }
+
+    .battle-schedule-report-table .admin-execution-report-row > :last-child {
+        grid-column: auto;
+    }
+
+    .battle-schedule-actions {
+        align-items: stretch;
+    }
+
+    .battle-schedule-actions form,
+    .battle-schedule-actions button {
+        width: 100%;
     }
 }
 

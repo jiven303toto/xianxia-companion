@@ -109,7 +109,7 @@
             <h2>{% if is_yuanying_sect %}本命元婴{% else %}自动元婴出窍{% endif %}</h2>
         </div>
         {% if is_yuanying_sect %}
-        <div class="artifact-card-tab-row" role="tablist" aria-label="本命元婴操作">
+        <div class="artifact-card-tab-row yuanying-card-tab-row" role="tablist" aria-label="本命元婴操作">
             <button type="button" class="inline-button artifact-card-tab{% if yuanying_default_tab == 'outing' %} active{% endif %}" data-yuanying-tab-target="outing" role="tab" aria-selected="{{ 'true' if yuanying_default_tab == 'outing' else 'false' }}">元婴出窍</button>
             <button type="button" class="inline-button artifact-card-tab{% if yuanying_default_tab == 'retreat' %} active{% endif %}" data-yuanying-tab-target="retreat" role="tab" aria-selected="{{ 'true' if yuanying_default_tab == 'retreat' else 'false' }}">元婴闭关</button>
         </div>
